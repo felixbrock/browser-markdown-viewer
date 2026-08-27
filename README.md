@@ -59,22 +59,39 @@ User `tasks.json`
 
 ## Keys
 
-Mirrors the VS Code breadcrumb commands. The activation chord sits at the top of `content/breadcrumbs.js` (`FOCUS_AND_SELECT`).
+Mirrors the VS Code breadcrumb commands and the VS Code list defaults, verified against VS Code 1.133. The activation chord sits at the top of `content/breadcrumbs.js` (`FOCUS_AND_SELECT`).
 
-| Key | Where | Does |
-| --- | --- | --- |
-| `ctrl+shift+alt+meta+end` | anywhere on the page | `breadcrumbs.focusAndSelect`, focus the last crumb and open its picker |
-| `left`, `right` | bar or picker | previous or next crumb, the picker follows when it is open |
-| `enter`, `down` | bar | open the picker of the focused crumb |
-| `space` | bar | jump to the focused crumb without a picker |
-| `up`, `down`, `pageup`, `pagedown`, `home`, `end` | picker | move the selection |
-| `enter` | picker | jump to the selected heading or open the selected file, close the picker |
-| `space` | picker | jump to the selected heading, keep the picker open |
-| `ctrl+enter` | bar or picker | open the entry in a new tab |
-| `ctrl+f` | picker | filter box, ancestors of matches stay visible, `escape` closes the box |
-| `escape` | bar or picker | close everything, focus returns to the page |
+Anywhere on the page
 
-Mouse works too, click a crumb for its picker, click a row to jump.
+| Key | Does |
+| --- | --- |
+| `ctrl+shift+alt+meta+end` | `breadcrumbs.focusAndSelect`, focus the last crumb and open its picker |
+
+Bar focused, no picker
+
+| Key | Does |
+| --- | --- |
+| `left`, `right` | previous or next crumb |
+| `enter`, `down` | open the picker of the focused crumb |
+| `space` | jump to the focused crumb without a picker |
+| `ctrl+enter` | open the focused crumb in a new tab |
+| `escape` | leave the bar, focus returns to the page |
+
+Picker open (the VS Code list rules, `list.collapse`, `list.expand`, `list.toggleExpand`, `list.select`)
+
+| Key | Does |
+| --- | --- |
+| `up`, `down`, `pageup`, `pagedown`, `home`, `end` | move the selection over the visible rows |
+| `left` | collapse the selected heading, on a collapsed heading or a leaf move to the parent |
+| `right` | expand the selected heading, on an expanded heading move to its first child |
+| `space` | toggle a heading with children, pick a leaf |
+| `enter` | jump to the selected heading or open the selected file, close the picker |
+| `ctrl+enter` | open the selected entry in a new tab |
+| `ctrl+left`, `ctrl+right` | previous or next crumb, the picker follows (`focusPreviousWithPicker`, `focusNextWithPicker`) |
+| `ctrl+f` | filter box, matches and their ancestors stay visible, `escape` closes the box |
+| `escape` | close the picker, focus returns to the page |
+
+The outline opens collapsed apart from the path to the current heading, as VS Code's `collapseByDefault` picker does, with the current heading selected and its siblings visible. Mouse works too, click a crumb for its picker, click the triangle to fold or unfold, click a row to jump.
 
 ## Layout
 

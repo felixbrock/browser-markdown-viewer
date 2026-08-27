@@ -1,12 +1,15 @@
 // Breadcrumb bar with a picker, modelled on the VS Code breadcrumbs widget.
 //
 // The chord below mirrors ~/.config/Code/User/keybindings.json, where
-// ctrl+shift+alt+meta+end runs breadcrumbs.focusAndSelect. While the bar is
-// active the keys mirror the VS Code defaults, left and right move between
-// crumbs (and move the picker with them when it is open), enter or down open
-// the picker of the focused crumb, space reveals without a picker, escape
-// returns to the page, ctrl+enter opens the entry in a new tab, ctrl+f opens
-// the filter box inside the picker.
+// ctrl+shift+alt+meta+end runs breadcrumbs.focusAndSelect. Everything else
+// mirrors the VS Code defaults. With the bar focused and no picker, left and
+// right move between crumbs, enter or down open the picker, space reveals.
+// Inside the picker the list rules apply, up and down move, left collapses
+// (or goes to the parent), right expands (or goes to the first child), space
+// toggles a parent and picks a leaf, enter picks, ctrl+left and ctrl+right
+// move the picker to the neighbouring crumb, ctrl+f opens the filter box,
+// escape returns to the page. The outline opens collapsed apart from the path
+// to the current heading, like VS Code's collapseByDefault picker.
 
 (() => {
   "use strict";
@@ -56,7 +59,9 @@
       this.list = null;
       this.rows = [];
       this.selectedRow = -1;
+      this.expanded = new Set();
       this.filterInput = null;
+      this.filterQuery = "";
       this.frame = 0;
       this.bar.tabIndex = -1;
       this.bar.setAttribute("role", "navigation");
@@ -83,6 +88,14 @@
 
     // headings, array of { level, text, id, el, parent } in document order
     setOutline(headings) {
+      for (const heading of headings) {
+        heading.children = [];
+      }
+      for (const heading of headings) {
+        if (heading.parent) {
+          heading.parent.children.push(heading);
+        }
+      }
       this.headings = headings;
       this.closePicker();
       this.current = null;
@@ -198,7 +211,7 @@
       this.openPicker(last);
     }
 
-    // breadcrumbs.focusNext
+    // breadcrumbs.focusNext and focusNextWithPicker
     focusNext() {
       if (this.items.length === 0) {
         return;
@@ -207,7 +220,7 @@
       this.moveFocus(next);
     }
 
-    // breadcrumbs.focusPrevious
+    // breadcrumbs.focusPrevious and focusPreviousWithPicker
     focusPrevious() {
       if (this.items.length === 0) {
         return;
@@ -296,6 +309,7 @@
       this.rows = [];
       this.selectedRow = -1;
       this.filterInput = null;
+      this.filterQuery = "";
       if (this.pickerFor !== null) {
         this.pickerFor = null;
         this.renderBar();
@@ -313,7 +327,7 @@
       this.renderBar();
 
       const picker = createElement("div", "mdv-picker");
-      picker.setAttribute("role", "listbox");
+      picker.setAttribute("role", "tree");
       const list = createElement("div", "mdv-list");
       picker.appendChild(list);
       document.body.appendChild(picker);
@@ -355,19 +369,36 @@
       this.picker.style.width = width + "px";
     }
 
+    // outline rows, collapsed by default, expanded along the path to the selected heading
     fillOutline(selectedHeading) {
       const minLevel = this.headings.reduce((min, heading) => Math.min(min, heading.level), 6);
+      this.expanded = new Set();
+      for (let heading = selectedHeading.parent; heading; heading = heading.parent) {
+        this.expanded.add(heading);
+      }
       let selected = 0;
       this.headings.forEach((heading, index) => {
-        const row = createElement("div", "mdv-row mdv-row-heading", headingLabel(heading));
+        const row = createElement("div", "mdv-row mdv-row-heading");
         row.style.setProperty("--indent", (heading.level - minLevel) * 14 + "px");
         row.title = heading.text;
+        const twistie = createElement("span", "mdv-twistie");
+        if (heading.children.length) {
+          twistie.classList.add("mdv-twistie-parent");
+          twistie.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.selectRow(index);
+            this.toggleRow(index);
+          });
+        }
+        row.append(twistie, createElement("span", "mdv-row-label", headingLabel(heading)));
         this.addRow(row, { kind: "heading", heading, label: headingLabel(heading) });
         if (heading === selectedHeading) {
           selected = index;
         }
       });
-      this.selectRow(selected);
+      this.refreshRows();
+      this.selectRow(selected, "center");
     }
 
     fillDirectory(entries, item) {
@@ -385,19 +416,21 @@
       sorted.forEach((entry, index) => {
         const url = entry.url || new URL(entry.href + (entry.isDir ? "/" : ""), item.dirUrl).href;
         const label = entry.isDir ? entry.name + "/" : entry.name;
-        const row = createElement("div", "mdv-row " + (entry.isDir ? "mdv-row-dir" : "mdv-row-file"), label);
+        const row = createElement("div", "mdv-row " + (entry.isDir ? "mdv-row-dir" : "mdv-row-file"));
         row.title = url;
+        row.append(createElement("span", "mdv-twistie"), createElement("span", "mdv-row-label", label));
         this.addRow(row, { kind: entry.isDir ? "dir" : "file", url, label });
         if (entry.name === item.selectName) {
           selected = index;
         }
       });
-      this.selectRow(selected);
+      this.refreshRows();
+      this.selectRow(selected, "center");
     }
 
     addRow(node, data) {
       const rowIndex = this.rows.length;
-      node.setAttribute("role", "option");
+      node.setAttribute("role", "treeitem");
       node.addEventListener("click", (event) => {
         event.preventDefault();
         this.selectRow(rowIndex);
@@ -407,7 +440,94 @@
       this.list.appendChild(node);
     }
 
-    selectRow(index) {
+    // tree state helpers
+
+    isParent(row) {
+      return row.data.kind === "heading" && row.data.heading.children.length > 0;
+    }
+
+    isExpanded(row) {
+      return this.isParent(row) && this.expanded.has(row.data.heading);
+    }
+
+    rowIndexOf(heading) {
+      return this.rows.findIndex((row) => row.data.heading === heading);
+    }
+
+    matchesFilter(row) {
+      return !this.filterQuery || row.data.label.toLowerCase().includes(this.filterQuery);
+    }
+
+    // Recompute which rows show. Without a filter a row shows when every ancestor
+    // is expanded. With a filter, matches and their ancestors show regardless.
+    refreshRows() {
+      const keep = new Set();
+      if (this.filterQuery) {
+        this.rows.forEach((row, index) => {
+          if (!this.matchesFilter(row)) {
+            return;
+          }
+          keep.add(index);
+          let heading = row.data.kind === "heading" ? row.data.heading.parent : null;
+          while (heading) {
+            keep.add(this.rowIndexOf(heading));
+            heading = heading.parent;
+          }
+        });
+      }
+      this.rows.forEach((row, index) => {
+        let visible;
+        if (this.filterQuery) {
+          visible = keep.has(index);
+        } else if (row.data.kind === "heading") {
+          visible = true;
+          for (let heading = row.data.heading.parent; heading; heading = heading.parent) {
+            if (!this.expanded.has(heading)) {
+              visible = false;
+              break;
+            }
+          }
+        } else {
+          visible = true;
+        }
+        row.hidden = !visible;
+        row.node.classList.toggle("hidden", !visible);
+        row.node.classList.toggle("match", Boolean(this.filterQuery) && this.matchesFilter(row));
+        if (this.isParent(row)) {
+          const open = Boolean(this.filterQuery) || this.expanded.has(row.data.heading);
+          row.node.classList.toggle("expanded", open);
+          row.node.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+      });
+    }
+
+    expandRow(index) {
+      const row = this.rows[index];
+      if (!row || !this.isParent(row) || this.expanded.has(row.data.heading)) {
+        return false;
+      }
+      this.expanded.add(row.data.heading);
+      this.refreshRows();
+      return true;
+    }
+
+    collapseRow(index) {
+      const row = this.rows[index];
+      if (!row || !this.isExpanded(row)) {
+        return false;
+      }
+      this.expanded.delete(row.data.heading);
+      this.refreshRows();
+      return true;
+    }
+
+    toggleRow(index) {
+      if (!this.collapseRow(index)) {
+        this.expandRow(index);
+      }
+    }
+
+    selectRow(index, block = "nearest") {
       if (this.selectedRow >= 0 && this.rows[this.selectedRow]) {
         this.rows[this.selectedRow].node.classList.remove("selected");
       }
@@ -417,7 +537,7 @@
         return;
       }
       row.node.classList.add("selected");
-      row.node.scrollIntoView({ block: "nearest" });
+      row.node.scrollIntoView({ block });
     }
 
     visibleRowIndexes() {
@@ -456,7 +576,49 @@
       return row && !row.hidden ? row.data : null;
     }
 
-    // enter inside the picker
+    // list.collapse, left inside the picker
+    collapseOrParent() {
+      const row = this.rows[this.selectedRow];
+      if (!row || this.filterQuery) {
+        return;
+      }
+      if (this.collapseRow(this.selectedRow)) {
+        return;
+      }
+      const parent = row.data.kind === "heading" ? row.data.heading.parent : null;
+      if (parent) {
+        this.selectRow(this.rowIndexOf(parent));
+      }
+    }
+
+    // list.expand, right inside the picker
+    expandOrFirstChild() {
+      const row = this.rows[this.selectedRow];
+      if (!row || this.filterQuery) {
+        return;
+      }
+      if (this.expandRow(this.selectedRow)) {
+        return;
+      }
+      if (this.isParent(row)) {
+        this.selectRow(this.rowIndexOf(row.data.heading.children[0]));
+      }
+    }
+
+    // list.toggleExpand, space inside the picker
+    toggleOrPick() {
+      const row = this.rows[this.selectedRow];
+      if (!row) {
+        return;
+      }
+      if (this.isParent(row) && !this.filterQuery) {
+        this.toggleRow(this.selectedRow);
+      } else {
+        this.pickRow();
+      }
+    }
+
+    // list.select, enter inside the picker
     pickRow() {
       const data = this.selectedData();
       if (!data) {
@@ -467,20 +629,6 @@
         this.selectEditor();
       } else {
         location.href = data.url;
-      }
-    }
-
-    // space inside the picker, reveal and keep the picker open
-    revealRow() {
-      const data = this.selectedData();
-      if (!data) {
-        return;
-      }
-      if (data.kind === "heading") {
-        this.revealHeading(data.heading);
-        if (this.picker) {
-          this.positionPicker(this.pickerFor);
-        }
       }
     }
 
@@ -527,34 +675,16 @@
     }
 
     applyFilter(query) {
-      const needle = query.trim().toLowerCase();
-      const keep = new Set();
-      this.rows.forEach((row, index) => {
-        if (!needle || row.data.label.toLowerCase().includes(needle)) {
-          keep.add(index);
-          // keep the ancestors of a matching heading so the tree context stays visible
-          let heading = row.data.kind === "heading" ? row.data.heading.parent : null;
-          while (heading) {
-            const parentIndex = this.rows.findIndex((candidate) => candidate.data.heading === heading);
-            if (parentIndex >= 0) {
-              keep.add(parentIndex);
-            }
-            heading = heading.parent;
-          }
-        }
-      });
-      this.rows.forEach((row, index) => {
-        row.hidden = !keep.has(index);
-        row.node.classList.toggle("hidden", row.hidden);
-        row.node.classList.toggle("match", Boolean(needle) && row.data.label.toLowerCase().includes(needle));
-      });
-      const selectedVisible = this.selectedRow >= 0 && keep.has(this.selectedRow) &&
-        (!needle || this.rows[this.selectedRow].data.label.toLowerCase().includes(needle));
-      if (!selectedVisible) {
-        const firstMatch = this.rows.findIndex((row) => !row.hidden && (!needle || row.data.label.toLowerCase().includes(needle)));
-        if (firstMatch >= 0) {
-          this.selectRow(firstMatch);
-        }
+      this.filterQuery = query.trim().toLowerCase();
+      this.refreshRows();
+      const current = this.rows[this.selectedRow];
+      if (current && !current.hidden && this.matchesFilter(current)) {
+        current.node.scrollIntoView({ block: "nearest" });
+        return;
+      }
+      const firstMatch = this.rows.findIndex((row) => !row.hidden && this.matchesFilter(row));
+      if (firstMatch >= 0) {
+        this.selectRow(firstMatch);
       }
     }
 
@@ -571,13 +701,14 @@
         return;
       }
       const inFilter = this.filterInput !== null && event.target === this.filterInput;
+      const inPicker = this.pickerFor !== null;
       const plain = !event.ctrlKey && !event.altKey && !event.metaKey;
-      const ctrlOnly = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
+      const ctrl = event.ctrlKey && !event.altKey && !event.metaKey;
       let handled = true;
 
       switch (event.key) {
         case "Escape":
-          if (inFilter || this.filterInput) {
+          if (this.filterInput) {
             this.closeFilter();
           } else {
             this.selectEditor();
@@ -586,61 +717,65 @@
         case "ArrowLeft":
           if (inFilter) {
             handled = false;
-          } else {
+          } else if (!inPicker || ctrl) {
             this.focusPrevious();
+          } else {
+            this.collapseOrParent();
           }
           break;
         case "ArrowRight":
           if (inFilter) {
             handled = false;
-          } else {
+          } else if (!inPicker || ctrl) {
             this.focusNext();
+          } else {
+            this.expandOrFirstChild();
           }
           break;
         case "ArrowDown":
-          if (this.pickerFor !== null) {
+          if (inPicker) {
             this.moveSelection(1);
           } else {
             this.selectFocused();
           }
           break;
         case "ArrowUp":
-          if (this.pickerFor !== null) {
+          if (inPicker) {
             this.moveSelection(-1);
           } else {
             handled = false;
           }
           break;
         case "PageDown":
-          if (this.pickerFor !== null) {
+          if (inPicker) {
             this.moveSelection(PAGE_STEP);
           } else {
             handled = false;
           }
           break;
         case "PageUp":
-          if (this.pickerFor !== null) {
+          if (inPicker) {
             this.moveSelection(-PAGE_STEP);
           } else {
             handled = false;
           }
           break;
         case "Home":
-          if (this.pickerFor !== null && !inFilter) {
+          if (inPicker && !inFilter) {
             this.selectEdge(false);
           } else {
             handled = false;
           }
           break;
         case "End":
-          if (this.pickerFor !== null && !inFilter) {
+          if (inPicker && !inFilter) {
             this.selectEdge(true);
           } else {
             handled = false;
           }
           break;
         case "Enter":
-          if (this.pickerFor !== null) {
+          if (inPicker) {
             if (event.ctrlKey) {
               this.openRowAside();
             } else {
@@ -655,15 +790,15 @@
         case " ":
           if (inFilter) {
             handled = false;
-          } else if (this.pickerFor !== null) {
-            this.revealRow();
+          } else if (inPicker) {
+            this.toggleOrPick();
           } else {
             this.revealFocused();
           }
           break;
         case "f":
         case "F":
-          if (ctrlOnly && this.pickerFor !== null) {
+          if (ctrl && !event.shiftKey && inPicker) {
             this.openFilter();
           } else {
             handled = false;

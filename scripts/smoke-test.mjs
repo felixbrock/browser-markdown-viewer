@@ -187,7 +187,32 @@ try {
   check("chord opens the picker", await session.evaluate("document.querySelector('.mdv-picker') !== null"));
   const selectedLabel = await session.evaluate("document.querySelector('.mdv-row.selected')?.textContent");
   check("picker selects the current heading", selectedLabel === crumbsMid[crumbsMid.length - 1], { selectedLabel });
+  const rowCounts = await session.evaluate("({ total: document.querySelectorAll('.mdv-row').length, visible: document.querySelectorAll('.mdv-row:not(.hidden)').length })");
+  check("outline opens collapsed apart from the current path", rowCounts.visible < rowCounts.total && rowCounts.visible > 3, rowCounts);
+  const pathExpanded = await session.evaluate("Array.from(document.querySelectorAll('.mdv-row.expanded')).map(r => r.textContent)");
+  check("ancestors of the current heading are expanded", pathExpanded.length === crumbsMid.filter((c) => c.startsWith("#")).length - 1, pathExpanded);
   await session.screenshot("02-picker.png");
+
+  // left collapses or walks to the parent, right expands or walks to the first child
+  await session.key("ArrowLeft", "ArrowLeft", 37);
+  const afterLeft = await session.evaluate("document.querySelector('.mdv-row.selected')?.textContent");
+  check("left on a leaf selects the parent", afterLeft === crumbsMid[crumbsMid.length - 2], { afterLeft });
+  await session.key("ArrowLeft", "ArrowLeft", 37);
+  const collapsedNow = await session.evaluate("document.querySelector('.mdv-row.selected')?.classList.contains('expanded') === false && document.querySelectorAll('.mdv-row:not(.hidden)').length");
+  check("left on an expanded parent collapses it", collapsedNow && collapsedNow < rowCounts.visible, { visibleAfterCollapse: collapsedNow });
+  await session.key("ArrowRight", "ArrowRight", 39);
+  check("right expands a collapsed parent", await session.evaluate("document.querySelector('.mdv-row.selected')?.classList.contains('expanded')"));
+  const parentLabel = await session.evaluate("document.querySelector('.mdv-row.selected')?.textContent");
+  await session.key("ArrowRight", "ArrowRight", 39);
+  const childLabel = await session.evaluate("document.querySelector('.mdv-row.selected')?.textContent");
+  check("right on an expanded parent selects its first child", childLabel !== parentLabel && childLabel.startsWith("#"), { parentLabel, childLabel });
+  await session.key(" ", "Space", 32, 0, " ");
+  const spaceOnChild = await session.evaluate("({ picker: document.querySelector('.mdv-picker') !== null, expandedChild: document.querySelector('.mdv-row.selected')?.classList.contains('expanded') })");
+  check("space toggles a parent or picks a leaf", spaceOnChild.picker ? spaceOnChild.expandedChild === true : true, spaceOnChild);
+  if (!spaceOnChild.picker) {
+    await session.key("End", "End", 35, CHORD);
+  }
+  await sleep(200);
 
   // move down twice and pick
   await session.key("ArrowDown", "ArrowDown", 40);
@@ -215,12 +240,12 @@ try {
   const crumbsAfterFilter = await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)");
   check("enter in the filter jumps to a matching heading", crumbsAfterFilter[crumbsAfterFilter.length - 1].toLowerCase().includes("queue"), crumbsAfterFilter.slice(-2));
 
-  // left arrow with the picker open walks to the file crumb and lists the folder
+  // ctrl+left with the picker open walks to the file crumb and lists the folder
   await session.key("End", "End", 35, CHORD);
   const crumbCount = await session.evaluate("document.querySelectorAll('.mdv-crumb').length");
   const headingCrumbs = await session.evaluate("document.querySelectorAll('.mdv-crumb-heading').length");
   for (let step = 0; step < headingCrumbs; step++) {
-    await session.key("ArrowLeft", "ArrowLeft", 37);
+    await session.key("ArrowLeft", "ArrowLeft", 37, MOD.ctrl);
   }
   await sleep(500);
   const dirRows = await session.evaluate("Array.from(document.querySelectorAll('.mdv-row')).map(r => r.textContent)");

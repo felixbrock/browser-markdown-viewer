@@ -150,13 +150,35 @@ body.mdv-body {
 }
 
 .mdv-row {
+  display: flex;
+  align-items: center;
   height: 22px;
-  padding-left: calc(8px + var(--indent, 0px));
+  padding-left: calc(4px + var(--indent, 0px));
   padding-right: 8px;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   cursor: pointer;
+}
+
+.mdv-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mdv-twistie {
+  flex: 0 0 16px;
+  width: 16px;
+  text-align: center;
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.mdv-twistie-parent::before {
+  content: "▶";
+}
+
+.mdv-row.expanded .mdv-twistie-parent::before {
+  content: "▼";
 }
 
 .mdv-row.hidden {
@@ -187,7 +209,7 @@ body.mdv-body {
   cursor: default;
 }
 
-.mdv-row-dir::before {
+.mdv-row-dir .mdv-row-label::before {
   content: "▸ ";
   opacity: 0.7;
 }
