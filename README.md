@@ -12,6 +12,7 @@ Unpacked Chromium extension (Brave, Chrome) that renders local markdown files in
 - Picker under any crumb, the full outline for heading crumbs, the folder listing for path crumbs
 - Live reload, the page re-renders when the file changes on disk, scroll position stays put
 - Opening a file that is already open switches to that tab instead of adding one
+- Section search on `ctrl+t`, the VS Code "Go to Symbol in Editor" quick pick, fuzzy filter over the headings, up and down preview the section, enter jumps, escape restores the view
 
 ## Install in Brave
 
@@ -21,7 +22,11 @@ Unpacked Chromium extension (Brave, Chrome) that renders local markdown files in
 4. Open `Details` for the extension and switch on `Allow access to file URLs` (without it the extension never runs on local files)
 5. Open any `.md` file, for example `file:///home/felix/repos/notes/README.md`
 
+6. Open `brave://extensions/shortcuts`, find `Go to section` under Browser Markdown Viewer and type `Ctrl+T` into its box (Chromium never applies the suggested key on its own because `Ctrl+T` is one of its own shortcuts, a manual assignment overrides it)
+
 Same steps in Chrome at `chrome://extensions`. After editing the extension files press the reload icon on `brave://extensions`.
+
+`Ctrl+T` keeps opening a new tab on every page without the viewer, the extension opens that tab itself. Only on rendered markdown pages it opens the section search instead.
 
 ## VS Code binding
 
@@ -66,6 +71,7 @@ Anywhere on the page
 | Key | Does |
 | --- | --- |
 | `ctrl+shift+alt+meta+end` | `breadcrumbs.focusAndSelect`, focus the last crumb and open its picker |
+| `ctrl+t` | `workbench.action.gotoSymbol`, open the section search (through the extension command, see Install step 6) |
 
 Bar focused, no picker
 
@@ -91,14 +97,26 @@ Picker open (the VS Code list rules, `list.collapse`, `list.expand`, `list.toggl
 | `ctrl+f` | filter box, matches and their ancestors stay visible, `escape` closes the box |
 | `escape` | close the picker, focus returns to the page |
 
-The outline opens collapsed apart from the path to the current heading, as VS Code's `collapseByDefault` picker does, with the current heading selected and its siblings visible. Mouse works too, click a crumb for its picker, click the triangle to fold or unfold, click a row to jump.
+Section search open
+
+| Key | Does |
+| --- | --- |
+| typing | fuzzy filter, every word must match, contiguous hits and word starts rank first, matched characters highlighted |
+| `up`, `down` | move and preview the section in the page, wraps around at the ends |
+| `pageup`, `pagedown` | move by ten |
+| `enter` | jump to the selected section and close |
+| `ctrl+t` | move to the next row |
+| `escape` | close and scroll back to where the page was |
+
+The search opens with the current heading selected. The outline picker opens collapsed apart from the path to the current heading, as VS Code's `collapseByDefault` picker does, with the current heading selected and its siblings visible. Mouse works too, click a crumb for its picker, click the triangle to fold or unfold, click a row to jump.
 
 ## Layout
 
 - `manifest.json` runs the content scripts on `file:///*` urls ending in a markdown extension
-- `service-worker.js` reuses open tabs, reads files for live reload, lists folders for the path crumbs
+- `service-worker.js` reuses open tabs, reads files for live reload, lists folders for the path crumbs, forwards the `ctrl+t` command or opens a new tab
 - `content/viewer.js` replaces the plain text page with rendered markdown, mermaid, highlighting, scroll restore, polling
 - `content/breadcrumbs.js` bar, picker, filter, key handling
+- `content/sectionsearch.js` the section search quick pick
 - `content/viewer.css` page and bar styles, light and dark
 - `vendor/` markdown-it 15, highlight.js 11 (common languages build), mermaid 11, licenses next to them
 - `bin/open-markdown` helper used by the VS Code task
@@ -110,7 +128,7 @@ The outline opens collapsed apart from the path to the current heading, as VS Co
 node scripts/smoke-test.mjs --file /home/felix/repos/notes/notes/job/search/interview_prep/system_design_interview.md --git 1 --dark 1 --out /tmp/mdv-smoke
 ```
 
-Launches a throwaway headless Brave with the extension loaded, drives it over the DevTools protocol, checks rendering, diagrams, anchors, the chord, picker, filter, folder crumb, live reload and tab reuse, and writes screenshots to `--out`. Pass `--browser` for another Chromium binary. Felix's own Brave profile is never touched.
+Launches a throwaway headless Brave with the extension loaded (the `Ctrl+T` assignment seeded into the profile, the unpacked extension id is derived from the folder path), drives it over the DevTools protocol, checks rendering, diagrams, anchors, the chord, picker, tree keys, filter, folder crumb, section search, live reload and tab reuse, and writes screenshots to `--out`. Pass `--browser` for another Chromium binary. Felix's own Brave profile is never touched.
 
 ## Notes
 

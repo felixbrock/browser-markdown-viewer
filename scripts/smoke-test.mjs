@@ -10,6 +10,7 @@
 
 import { spawn } from "node:child_process";
 import { mkdirSync, copyFileSync, writeFileSync, appendFileSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, resolve, basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,6 +43,20 @@ writeFileSync(
 if (args.git) {
   mkdirSync(join(out, "docs", ".git"), { recursive: true });
 }
+
+// The ctrl+t suggestion is never applied automatically (Chromium keeps its own
+// accelerators), so seed the profile with the assignment the shortcuts page
+// would write. The unpacked extension id is derived from the folder path.
+const extensionId = createHash("sha256")
+  .update(extensionDir)
+  .digest("hex")
+  .slice(0, 32)
+  .replace(/[0-9a-f]/g, (c) => String.fromCharCode(97 + parseInt(c, 16)));
+mkdirSync(join(out, "profile", "Default"), { recursive: true });
+writeFileSync(
+  join(out, "profile", "Default", "Preferences"),
+  JSON.stringify({ extensions: { commands: { "linux:Ctrl+T": { command_name: "go-to-section", extension: extensionId, global: false } } } })
+);
 const fileUrl = "file://" + testFile;
 
 const failures = [];
@@ -255,6 +270,36 @@ try {
   await session.key("Escape", "Escape", 27);
   check("escape closes the picker and the bar", await session.evaluate("document.querySelector('.mdv-picker') === null && document.querySelector('.mdv-crumb.focused') === null"));
 
+  // ctrl+t opens the section search, the VS Code goto symbol quick pick
+  await session.key("t", "KeyT", 84, MOD.ctrl);
+  await sleep(500);
+  const pagesAfterCtrlT = (await targets()).filter((t) => t.type === "page").length;
+  check("ctrl+t opens the section search instead of a new tab", pagesAfterCtrlT === 1 && (await session.evaluate("document.querySelector('.mdv-quick') !== null && document.activeElement?.classList.contains('mdv-quick-field')")), { pages: pagesAfterCtrlT });
+  const initialSelected = await session.evaluate("document.querySelector('.mdv-quick-row.selected')?.textContent");
+  const crumbsNow = await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)");
+  check("search preselects the current heading", initialSelected === crumbsNow[crumbsNow.length - 1], { initialSelected });
+  const scrollBefore = await session.evaluate("window.scrollY");
+  await session.send("Input.insertText", { text: "scal data" });
+  await sleep(300);
+  const searchRows = await session.evaluate("Array.from(document.querySelectorAll('.mdv-quick-row')).map(r => r.textContent)");
+  check("search filters fuzzily and ranks the best hit first", searchRows[0] === "### Scaling data pipelines", searchRows.slice(0, 3));
+  check("typing previews the first match", (await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)")).slice(-1)[0] === "### Scaling data pipelines");
+  check("matched characters are highlighted", await session.evaluate("document.querySelectorAll('.mdv-quick-row.selected .mdv-hl').length > 0"));
+  await session.screenshot("06-search.png");
+  await session.key("Escape", "Escape", 27);
+  await sleep(200);
+  check("escape closes the search and restores the scroll position", (await session.evaluate("window.scrollY")) === scrollBefore && (await session.evaluate("document.querySelector('.mdv-quick') === null")));
+  await session.key("t", "KeyT", 84, MOD.ctrl);
+  await sleep(400);
+  await session.send("Input.insertText", { text: "queue" });
+  await sleep(300);
+  await session.key("ArrowDown", "ArrowDown", 40);
+  const previewLabel = await session.evaluate("document.querySelector('.mdv-quick-row.selected')?.textContent");
+  await session.key("Enter", "Enter", 13, 0, "\r");
+  await sleep(200);
+  const crumbsAfterSearch = await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)");
+  check("enter jumps to the selected section", crumbsAfterSearch[crumbsAfterSearch.length - 1] === previewLabel && (await session.evaluate("document.querySelector('.mdv-quick') === null")), { previewLabel });
+
   // space on a crumb reveals without a picker
   await session.evaluate("window.scrollTo(0, 0)");
   await sleep(200);
@@ -284,6 +329,23 @@ try {
   const otherTarget = await waitForTarget((t) => t.type === "page" && t.url.endsWith("other.md"));
   const other = new Session(otherTarget.webSocketDebuggerUrl);
   await other.ready;
+  await other.send("Page.enable");
+  await other.send("Runtime.enable");
+  await other.evaluate("new Promise(r => setTimeout(r, 300))");
+  // ctrl+t on a page without the viewer still opens a new tab
+  await other.evaluate("location.href = 'about:blank'");
+  await sleep(800);
+  const blankTarget = await waitForTarget((t) => t.type === "page" && t.url === "about:blank");
+  const blank = new Session(blankTarget.webSocketDebuggerUrl);
+  await blank.ready;
+  const pagesBeforeBlank = (await targets()).filter((t) => t.type === "page").length;
+  await blank.key("t", "KeyT", 84, MOD.ctrl);
+  await sleep(800);
+  const pagesAfterBlank = (await targets()).filter((t) => t.type === "page").length;
+  check("ctrl+t on a non markdown tab still opens a new tab", pagesAfterBlank === pagesBeforeBlank + 1, { before: pagesBeforeBlank, after: pagesAfterBlank });
+  blank.close();
+  await other.evaluate(`location.href = ${JSON.stringify("file://" + join(out, "docs", "nested", "other.md"))}`);
+  await sleep(1200);
   check("second file renders", await waitFor(other, "document.querySelector('.mdv-content h1')?.textContent === 'Other'", 8000));
   check("code fences are highlighted", await other.evaluate("document.querySelectorAll('.mdv-content pre code .hljs-keyword').length > 0"));
   check("task lists render as checkboxes", await other.evaluate("document.querySelectorAll('.mdv-content li.mdv-task input[type=checkbox]').length === 2 && document.querySelectorAll('.mdv-content li.mdv-task input:checked').length === 1"));

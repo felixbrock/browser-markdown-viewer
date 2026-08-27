@@ -691,6 +691,9 @@
     // keys
 
     onKeyDown(event) {
+      if (event.target instanceof Element && event.target.closest(".mdv-quick")) {
+        return;
+      }
       if (matchesChord(event, FOCUS_AND_SELECT)) {
         event.preventDefault();
         event.stopPropagation();

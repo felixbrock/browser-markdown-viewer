@@ -19,6 +19,9 @@
   --mdv-match: #b58900;
   --mdv-shadow: rgba(0, 0, 0, 0.16);
   --mdv-flash: rgba(0, 95, 184, 0.2);
+  --mdv-quick-bg: #f3f3f3;
+  --mdv-input-bg: #ffffff;
+  --mdv-highlight: #0066bf;
   --hl-comment: #008000;
   --hl-keyword: #0000ff;
   --hl-string: #a31515;
@@ -48,6 +51,9 @@
     --mdv-match: #f5d76e;
     --mdv-shadow: rgba(0, 0, 0, 0.7);
     --mdv-flash: rgba(55, 148, 255, 0.35);
+    --mdv-quick-bg: #0a0a0a;
+    --mdv-input-bg: #000000;
+    --mdv-highlight: #f38518;
     --hl-comment: #6a9955;
     --hl-keyword: #569cd6;
     --hl-string: #ce9178;
@@ -232,6 +238,92 @@ body.mdv-body {
 
 .mdv-filter-input:focus {
   border-color: var(--mdv-focus);
+}
+
+/* section search, the VS Code quick pick */
+
+.mdv-quick {
+  position: fixed;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--mdv-quick-bg);
+  color: var(--mdv-fg);
+  border: 1px solid var(--mdv-picker-border);
+  box-shadow: 0 4px 12px var(--mdv-shadow);
+  font-size: 13px;
+  z-index: 1002;
+  user-select: none;
+}
+
+.mdv-quick-input {
+  display: flex;
+  align-items: center;
+  margin: 6px;
+  padding: 2px 6px;
+  background: var(--mdv-input-bg);
+  border: 1px solid var(--mdv-border);
+}
+
+.mdv-quick-input:focus-within {
+  border-color: var(--mdv-focus);
+}
+
+.mdv-quick-prefix {
+  opacity: 0.7;
+  margin-right: 2px;
+}
+
+.mdv-quick-field {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 20px;
+}
+
+.mdv-quick-list {
+  max-height: 44vh;
+  overflow: auto;
+  padding-bottom: 4px;
+}
+
+.mdv-quick-row {
+  height: 22px;
+  line-height: 22px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.mdv-quick-row:hover {
+  background: var(--mdv-hover-bg);
+}
+
+.mdv-quick-row.selected {
+  background: var(--mdv-sel-bg);
+  color: var(--mdv-sel-fg);
+  outline: 1px solid var(--mdv-focus);
+  outline-offset: -1px;
+}
+
+.mdv-quick-row .mdv-hl {
+  color: var(--mdv-highlight);
+  font-weight: 600;
+}
+
+.mdv-quick-empty {
+  padding: 4px 8px;
+  color: var(--mdv-muted);
 }
 
 /* rendered markdown, close to the VS Code preview */

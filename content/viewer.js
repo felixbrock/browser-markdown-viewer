@@ -34,6 +34,7 @@
     text: "",
     md: null,
     breadcrumbs: null,
+    sectionSearch: null,
     content: null,
     diagramCache: new Map(),
     diagramCounter: 0,
@@ -450,7 +451,16 @@
   }
 
   function onMessage(message, sender, sendResponse) {
-    if (!message || message.type !== "refresh") {
+    if (!message) {
+      return false;
+    }
+    if (message.type === "gotoSection") {
+      state.breadcrumbs.selectEditor();
+      state.sectionSearch.show();
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message.type !== "refresh") {
       return false;
     }
     pollOnce(true).then(() => {
@@ -497,10 +507,19 @@
       listDir,
       readingOffset: READING_OFFSET
     });
+    state.sectionSearch = new window.MdvSectionSearch({
+      getHeadings: () => state.breadcrumbs.headings,
+      getCurrent: () => state.breadcrumbs.computeCurrent(),
+      reveal: (heading) => state.breadcrumbs.revealHeading(heading),
+      onCancel: () => {
+        state.breadcrumbs.pinUntil = 0;
+        state.breadcrumbs.update(true);
+      }
+    });
   }
 
   async function boot() {
-    if (!window.markdownit || !window.MdvBreadcrumbs) {
+    if (!window.markdownit || !window.MdvBreadcrumbs || !window.MdvSectionSearch) {
       log("dependencies missing, leaving the page alone");
       hideStyle.remove();
       return;

@@ -6,9 +6,29 @@ const LOG_PREFIX = "[browser-markdown-viewer]";
 const MARKDOWN_EXTENSIONS = [".md", ".markdown", ".mdown"];
 const FRESH_TAB_WINDOW_MS = 3000;
 
+const STARTUP_GUARD_MS = 10000;
+const RECENT_TAB_MS = 5000;
+
 // tab id -> creation time, tabs that were just created and may still receive their url
 const freshTabs = new Map();
 const handledTabs = new Set();
+// tab id -> creation time, so a tab never treats another brand new tab as the one to reuse
+const recentlyCreated = new Map();
+// Session restore creates every saved tab at once, reusing tabs then could close both copies.
+let startupGuardUntil = 0;
+
+chrome.runtime.onStartup.addListener(() => {
+  startupGuardUntil = Date.now() + STARTUP_GUARD_MS;
+});
+
+function pruneRecent() {
+  const now = Date.now();
+  for (const [tabId, createdAt] of recentlyCreated) {
+    if (now - createdAt > RECENT_TAB_MS) {
+      recentlyCreated.delete(tabId);
+    }
+  }
+}
 
 function isMarkdownFileUrl(url) {
   if (!url) {
@@ -35,13 +55,22 @@ function keyOf(url) {
 function forgetTab(tabId) {
   freshTabs.delete(tabId);
   handledTabs.delete(tabId);
+  recentlyCreated.delete(tabId);
 }
 
 async function reuseExistingTab(newTab, url) {
+  if (Date.now() < startupGuardUntil) {
+    return false;
+  }
   const key = keyOf(url);
+  pruneRecent();
   const tabs = await chrome.tabs.query({});
   const existing = tabs.find(
-    (tab) => tab.id !== newTab.id && isMarkdownFileUrl(tab.url) && keyOf(tab.url) === key
+    (tab) =>
+      tab.id !== newTab.id &&
+      !recentlyCreated.has(tab.id) &&
+      isMarkdownFileUrl(tab.url) &&
+      keyOf(tab.url) === key
   );
   if (!existing) {
     return false;
@@ -83,6 +112,7 @@ async function handleFreshTab(tab, url) {
 
 chrome.tabs.onCreated.addListener((tab) => {
   freshTabs.set(tab.id, Date.now());
+  recentlyCreated.set(tab.id, Date.now());
   const url = tab.pendingUrl || tab.url;
   if (url) {
     handleFreshTab(tab, url);
@@ -133,6 +163,31 @@ function parseDirectoryListing(html) {
   }
   return entries;
 }
+
+// ctrl+t, section search on a markdown tab, a plain new tab everywhere else.
+async function activeTab(tab) {
+  if (tab && tab.id !== undefined) {
+    return tab;
+  }
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return tabs[0];
+}
+
+chrome.commands.onCommand.addListener(async (command, tab) => {
+  if (command !== "go-to-section") {
+    return;
+  }
+  const target = await activeTab(tab);
+  if (target && isMarkdownFileUrl(target.url)) {
+    try {
+      await chrome.tabs.sendMessage(target.id, { type: "gotoSection" });
+      return;
+    } catch (error) {
+      console.log(LOG_PREFIX, "no viewer in the active tab", error?.message);
+    }
+  }
+  await chrome.tabs.create({});
+});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {

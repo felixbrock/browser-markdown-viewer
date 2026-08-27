@@ -3,14 +3,20 @@
   "name": "Browser Markdown Viewer",
   "description": "Renders local markdown files in the browser with VS Code style breadcrumb navigation.",
   "version": "1.0.0",
-  "permissions": ["tabs"],
-  "host_permissions": ["file:///*"],
+  "permissions": [
+    "tabs"
+  ],
+  "host_permissions": [
+    "file:///*"
+  ],
   "background": {
     "service_worker": "service-worker.js"
   },
   "content_scripts": [
     {
-      "matches": ["file:///*"],
+      "matches": [
+        "file:///*"
+      ],
       "include_globs": [
         "*.md",
         "*.md#*",
@@ -27,13 +33,24 @@
         "vendor/highlight.min.js",
         "vendor/mermaid.min.js",
         "content/breadcrumbs.js",
+        "content/sectionsearch.js",
         "content/viewer.js"
       ],
-      "css": ["content/viewer.css"],
+      "css": [
+        "content/viewer.css"
+      ],
       "run_at": "document_start"
     }
   ],
   "action": {
     "default_title": "Browser Markdown Viewer"
+  },
+  "commands": {
+    "go-to-section": {
+      "suggested_key": {
+        "default": "Ctrl+T"
+      },
+      "description": "Go to section on a markdown page, otherwise open a new tab"
+    }
   }
 }
