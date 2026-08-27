@@ -32,6 +32,7 @@
         "vendor/markdown-it.min.js",
         "vendor/highlight.min.js",
         "vendor/mermaid.min.js",
+        "content/history.js",
         "content/breadcrumbs.js",
         "content/sectionsearch.js",
         "content/viewer.js"

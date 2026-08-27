@@ -49,6 +49,7 @@
       this.fileSegments = options.fileSegments;
       this.listDir = options.listDir;
       this.readingOffset = options.readingOffset;
+      this.jump = options.jump || ((action) => action());
       this.headings = [];
       this.items = [];
       this.focused = null;
@@ -255,7 +256,7 @@
         return;
       }
       if (item.kind === "heading") {
-        this.revealHeading(item.heading);
+        this.jump(() => this.revealHeading(item.heading));
         this.selectEditor();
       } else {
         location.href = item.url;
@@ -625,7 +626,7 @@
         return;
       }
       if (data.kind === "heading") {
-        this.revealHeading(data.heading);
+        this.jump(() => this.revealHeading(data.heading));
         this.selectEditor();
       } else {
         location.href = data.url;
@@ -700,7 +701,7 @@
         this.focusAndSelect();
         return;
       }
-      if (!this.active) {
+      if (!this.active || event.altKey) {
         return;
       }
       const inFilter = this.filterInput !== null && event.target === this.filterInput;

@@ -72,6 +72,7 @@ Anywhere on the page
 | --- | --- |
 | `ctrl+shift+alt+meta+end` | `breadcrumbs.focusAndSelect`, focus the last crumb and open its picker |
 | `ctrl+t` | `workbench.action.gotoSymbol`, open the section search (through the extension command, see Install step 6) |
+| `alt+left`, `alt+right` | `workbench.action.navigateBack` and `navigateForward` over the positions visited in this document, with nothing left in that direction the browser's own back or forward runs |
 
 Bar focused, no picker
 
@@ -108,6 +109,8 @@ Section search open
 | `ctrl+t` | move to the next row |
 | `escape` | close and scroll back to where the page was |
 
+Position history, VS Code adds an entry when the cursor jumps more than ten lines and updates the current entry for smaller moves. Here a deliberate jump (picker enter, crumb space, search enter, an anchor link) adds an entry, so does a manual move of more than two screens between pauses, smaller scrolling updates the current entry, previews while typing in the search never count and escape puts the page back. Fifty entries, going back and then jumping somewhere new drops the forward entries.
+
 The search opens with the current heading selected. Each result shows its parent heading as a dim description, the first row carries the result count, as the VS Code quick pick does. The outline picker opens collapsed apart from the path to the current heading, as VS Code's `collapseByDefault` picker does, with the current heading selected and its siblings visible. Mouse works too, click a crumb for its picker, click the triangle to fold or unfold, click a row to jump.
 
 ## Layout
@@ -117,6 +120,7 @@ The search opens with the current heading selected. Each result shows its parent
 - `content/viewer.js` replaces the plain text page with rendered markdown, mermaid, highlighting, scroll restore, polling
 - `content/breadcrumbs.js` bar, picker, filter, key handling
 - `content/sectionsearch.js` the section search quick pick
+- `content/history.js` position history for alt+left and alt+right
 - `content/viewer.css` page and bar styles, light and dark
 - `vendor/` markdown-it 15, highlight.js 11 (common languages build), mermaid 11, licenses next to them
 - `bin/open-markdown` helper used by the VS Code task

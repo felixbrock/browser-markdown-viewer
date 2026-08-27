@@ -35,6 +35,7 @@
     md: null,
     breadcrumbs: null,
     sectionSearch: null,
+    history: null,
     content: null,
     diagramCache: new Map(),
     diagramCounter: 0,
@@ -328,9 +329,9 @@
   // scroll position, expressed relative to the heading at the reading line
 
   function captureAnchor() {
-    const heading = state.breadcrumbs.computeCurrent();
+    const heading = state.breadcrumbs ? state.breadcrumbs.computeCurrent() : null;
     if (heading) {
-      return { id: heading.id, top: heading.el.getBoundingClientRect().top };
+      return { id: heading.id, top: heading.el.getBoundingClientRect().top, y: window.scrollY };
     }
     return { id: null, y: window.scrollY };
   }
@@ -401,6 +402,7 @@
       if (!scrollToHash()) {
         restoreStoredScroll();
       }
+      state.history.reset();
     } else {
       restoreAnchor(anchor);
     }
@@ -409,6 +411,7 @@
         if (!scrollToHash()) {
           restoreStoredScroll();
         }
+        state.history.reset();
       } else if (!options.initial) {
         restoreAnchor(anchor);
       }
@@ -501,17 +504,30 @@
     const content = createElement("main", "mdv-content");
     document.body.append(bar, content);
     state.content = content;
+    // created first so its key listener runs before the breadcrumb one
+    state.history = new window.MdvHistory({
+      capture: captureAnchor,
+      restore: restoreAnchor,
+      bigMove: () => Math.max(2 * window.innerHeight, 1200)
+    });
     state.breadcrumbs = new window.MdvBreadcrumbs({
       bar,
       fileSegments: segments,
       listDir,
-      readingOffset: READING_OFFSET
+      readingOffset: READING_OFFSET,
+      jump: (action) => state.history.jump(action)
     });
     state.sectionSearch = new window.MdvSectionSearch({
       getHeadings: () => state.breadcrumbs.headings,
       getCurrent: () => state.breadcrumbs.computeCurrent(),
+      onOpen: () => state.history.suspend(),
       reveal: (heading) => state.breadcrumbs.revealHeading(heading),
+      commit: (heading) => {
+        state.history.resume();
+        state.history.jump(() => state.breadcrumbs.revealHeading(heading));
+      },
       onCancel: () => {
+        state.history.resume();
         state.breadcrumbs.pinUntil = 0;
         state.breadcrumbs.update(true);
       }
@@ -519,7 +535,7 @@
   }
 
   async function boot() {
-    if (!window.markdownit || !window.MdvBreadcrumbs || !window.MdvSectionSearch) {
+    if (!window.markdownit || !window.MdvBreadcrumbs || !window.MdvSectionSearch || !window.MdvHistory) {
       log("dependencies missing, leaving the page alone");
       hideStyle.remove();
       return;

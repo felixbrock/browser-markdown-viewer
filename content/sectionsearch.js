@@ -115,6 +115,8 @@
       this.getHeadings = options.getHeadings;
       this.getCurrent = options.getCurrent;
       this.reveal = options.reveal;
+      this.commit = options.commit || options.reveal;
+      this.onOpen = options.onOpen || (() => {});
       this.onCancel = options.onCancel;
       this.root = null;
       this.input = null;
@@ -140,6 +142,7 @@
         return;
       }
       this.originalScroll = window.scrollY;
+      this.onOpen();
       const root = createElement("div", "mdv-quick");
       const box = createElement("div", "mdv-quick-input");
       const prefix = createElement("span", "mdv-quick-prefix", "@");
@@ -188,7 +191,9 @@
       const row = this.rows[this.selected];
       this.close();
       if (row) {
-        this.reveal(row.heading);
+        this.commit(row.heading);
+      } else {
+        this.onCancel();
       }
     }
 

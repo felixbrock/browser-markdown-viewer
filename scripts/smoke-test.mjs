@@ -307,6 +307,46 @@ try {
   const crumbsAfterSearch = await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)");
   check("enter jumps to the selected section", crumbsAfterSearch[crumbsAfterSearch.length - 1] === previewLabel && (await session.evaluate("document.querySelector('.mdv-quick') === null")), { previewLabel });
 
+  // alt+left and alt+right walk the position history
+  const positionBeforeJump = await session.evaluate("window.scrollY");
+  await session.key("ArrowLeft", "ArrowLeft", 37, MOD.alt);
+  await sleep(400);
+  const positionAfterBack = await session.evaluate("window.scrollY");
+  check("alt+left returns to the position before the search jump", Math.abs(positionAfterBack - scrollBefore) <= 4 && positionAfterBack !== positionBeforeJump, { positionBeforeJump, positionAfterBack, scrollBefore });
+  await session.key("ArrowRight", "ArrowRight", 39, MOD.alt);
+  await sleep(400);
+  check("alt+right goes forward again", Math.abs((await session.evaluate("window.scrollY")) - positionBeforeJump) <= 4);
+  await session.key("ArrowRight", "ArrowRight", 39, MOD.alt);
+  await sleep(300);
+  check("alt+right at the end changes nothing", Math.abs((await session.evaluate("window.scrollY")) - positionBeforeJump) <= 4);
+  // a big manual move adds an entry, a small one does not
+  await session.evaluate("window.scrollBy(0, 120)");
+  await sleep(500);
+  const smallMove = await session.evaluate("window.scrollY");
+  await session.evaluate("window.scrollTo(0, 0)");
+  await sleep(500);
+  await session.key("ArrowLeft", "ArrowLeft", 37, MOD.alt);
+  await sleep(400);
+  check("a big manual move adds an entry, a small one updates in place", Math.abs((await session.evaluate("window.scrollY")) - smallMove) <= 4, { smallMove, now: await session.evaluate("window.scrollY") });
+  // anchor links add an entry
+  await session.evaluate("document.querySelector('.mdv-content a[href=\"#queue\"]').click()");
+  await sleep(500);
+  check("an anchor link jumps", (await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)")).slice(-1)[0] === "### Queue");
+  await session.key("ArrowLeft", "ArrowLeft", 37, MOD.alt);
+  await sleep(400);
+  check("alt+left returns from an anchor link", Math.abs((await session.evaluate("window.scrollY")) - smallMove) <= 4);
+  // previews in the search leave no trace
+  await session.key("t", "KeyT", 84, MOD.ctrl);
+  await sleep(300);
+  await session.send("Input.insertText", { text: "data" });
+  await sleep(300);
+  await session.key("ArrowDown", "ArrowDown", 40);
+  await session.key("Escape", "Escape", 27);
+  await sleep(400);
+  await session.key("ArrowRight", "ArrowRight", 39, MOD.alt);
+  await sleep(400);
+  check("search previews leave no history entries", (await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)")).slice(-1)[0] === "### Queue");
+
   // space on a crumb reveals without a picker
   await session.evaluate("window.scrollTo(0, 0)");
   await sleep(200);
