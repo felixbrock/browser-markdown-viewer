@@ -101,14 +101,14 @@ Section search open
 
 | Key | Does |
 | --- | --- |
-| typing | fuzzy filter, every word must match, contiguous hits and word starts rank first, matched characters highlighted |
+| typing | fuzzy filter, every word must match the heading or, failing that, its parent heading (VS Code's container query), contiguous hits and word starts rank first, matched characters highlighted |
 | `up`, `down` | move and preview the section in the page, wraps around at the ends |
 | `pageup`, `pagedown` | move by ten |
 | `enter` | jump to the selected section and close |
 | `ctrl+t` | move to the next row |
 | `escape` | close and scroll back to where the page was |
 
-The search opens with the current heading selected. The outline picker opens collapsed apart from the path to the current heading, as VS Code's `collapseByDefault` picker does, with the current heading selected and its siblings visible. Mouse works too, click a crumb for its picker, click the triangle to fold or unfold, click a row to jump.
+The search opens with the current heading selected. Each result shows its parent heading as a dim description, the first row carries the result count, as the VS Code quick pick does. The outline picker opens collapsed apart from the path to the current heading, as VS Code's `collapseByDefault` picker does, with the current heading selected and its siblings visible. Mouse works too, click a crumb for its picker, click the triangle to fold or unfold, click a row to jump.
 
 ## Layout
 

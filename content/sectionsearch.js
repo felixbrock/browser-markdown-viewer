@@ -58,22 +58,32 @@
     return { score, positions };
   }
 
-  function matchQuery(query, label) {
+  // Every word must hit the heading, a word that misses the heading may hit the
+  // parent heading instead (VS Code's container query), at half the score.
+  function matchQuery(query, label, parentLabel) {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) {
-      return { score: 0, positions: [] };
+      return { score: 0, positions: [], parentPositions: [] };
     }
     let score = 0;
     const positions = new Set();
+    const parentPositions = new Set();
     for (const term of terms) {
-      const match = matchTerm(term, label);
+      let match = matchTerm(term, label);
+      if (match) {
+        score += match.score;
+        match.positions.forEach((position) => positions.add(position));
+        continue;
+      }
+      match = parentLabel ? matchTerm(term, parentLabel) : null;
       if (!match) {
         return null;
       }
-      score += match.score;
-      match.positions.forEach((position) => positions.add(position));
+      score += match.score / 2;
+      match.positions.forEach((position) => parentPositions.add(position));
     }
-    return { score, positions: Array.from(positions).sort((a, b) => a - b) };
+    const sorted = (set) => Array.from(set).sort((a, b) => a - b);
+    return { score, positions: sorted(positions), parentPositions: sorted(parentPositions) };
   }
 
   function renderLabel(label, positions) {
@@ -188,9 +198,18 @@
       const rows = [];
       headings.forEach((heading, index) => {
         const label = "#".repeat(heading.level) + " " + heading.text;
-        const match = matchQuery(query, label);
+        const parentLabel = heading.parent ? "#".repeat(heading.parent.level) + " " + heading.parent.text : "";
+        const match = matchQuery(query, label, parentLabel);
         if (match) {
-          rows.push({ heading, label, index, score: match.score, positions: match.positions });
+          rows.push({
+            heading,
+            label,
+            parentLabel,
+            index,
+            score: match.score,
+            positions: match.positions,
+            parentPositions: match.parentPositions
+          });
         }
       });
       if (query.trim()) {
@@ -205,8 +224,18 @@
       }
       rows.forEach((row, position) => {
         const node = createElement("div", "mdv-quick-row");
-        node.appendChild(renderLabel(row.label, row.positions));
-        node.title = row.heading.text;
+        const label = createElement("span", "mdv-quick-label");
+        label.appendChild(renderLabel(row.label, row.positions));
+        node.appendChild(label);
+        if (row.parentLabel) {
+          const description = createElement("span", "mdv-quick-desc");
+          description.appendChild(renderLabel(row.parentLabel, row.parentPositions));
+          node.appendChild(description);
+        }
+        if (position === 0) {
+          node.appendChild(createElement("span", "mdv-quick-count", "sections (" + rows.length + ")"));
+        }
+        node.title = row.parentLabel ? row.heading.text + "  in  " + row.parentLabel : row.heading.text;
         node.addEventListener("click", (event) => {
           event.preventDefault();
           this.selected = position;
