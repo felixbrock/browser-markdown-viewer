@@ -1,0 +1,473 @@
+:root {
+  color-scheme: light dark;
+  --mdv-bg: #ffffff;
+  --mdv-fg: #1f1f1f;
+  --mdv-muted: #6e6e6e;
+  --mdv-link: #006ab1;
+  --mdv-border: #d4d4d4;
+  --mdv-code-bg: #f3f3f3;
+  --mdv-blockquote: #d0d0d0;
+  --mdv-bar-bg: #f8f8f8;
+  --mdv-bar-fg: #616161;
+  --mdv-bar-strong: #1f1f1f;
+  --mdv-focus: #005fb8;
+  --mdv-picker-bg: #ffffff;
+  --mdv-picker-border: #c8c8c8;
+  --mdv-sel-bg: #e8e8e8;
+  --mdv-sel-fg: #1f1f1f;
+  --mdv-hover-bg: #f0f0f0;
+  --mdv-match: #b58900;
+  --mdv-shadow: rgba(0, 0, 0, 0.16);
+  --mdv-flash: rgba(0, 95, 184, 0.2);
+  --hl-comment: #008000;
+  --hl-keyword: #0000ff;
+  --hl-string: #a31515;
+  --hl-number: #098658;
+  --hl-title: #795e26;
+  --hl-variable: #001080;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --mdv-bg: #000000;
+    --mdv-fg: #ffffff;
+    --mdv-muted: #a0a0a0;
+    --mdv-link: #3794ff;
+    --mdv-border: #3c3c3c;
+    --mdv-code-bg: #0d0d0d;
+    --mdv-blockquote: #4a4a4a;
+    --mdv-bar-bg: #000000;
+    --mdv-bar-fg: #a0a0a0;
+    --mdv-bar-strong: #ffffff;
+    --mdv-focus: #f38518;
+    --mdv-picker-bg: #0a0a0a;
+    --mdv-picker-border: #6fc3df;
+    --mdv-sel-bg: #04395e;
+    --mdv-sel-fg: #ffffff;
+    --mdv-hover-bg: #1a1a1a;
+    --mdv-match: #f5d76e;
+    --mdv-shadow: rgba(0, 0, 0, 0.7);
+    --mdv-flash: rgba(55, 148, 255, 0.35);
+    --hl-comment: #6a9955;
+    --hl-keyword: #569cd6;
+    --hl-string: #ce9178;
+    --hl-number: #b5cea8;
+    --hl-title: #dcdcaa;
+    --hl-variable: #9cdcfe;
+  }
+}
+
+html,
+body.mdv-body {
+  margin: 0;
+  padding: 0;
+  background: var(--mdv-bg);
+  color: var(--mdv-fg);
+}
+
+body.mdv-body {
+  font-family: system-ui, "Segoe UI", Ubuntu, "Droid Sans", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+
+/* breadcrumb bar */
+
+.mdv-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 22px;
+  background: var(--mdv-bar-bg);
+  color: var(--mdv-bar-fg);
+  border-bottom: 1px solid var(--mdv-border);
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+  outline: none;
+  z-index: 1000;
+}
+
+.mdv-crumb {
+  padding: 0 3px;
+  min-width: 1.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  flex: 0 1 auto;
+}
+
+.mdv-crumb-heading {
+  flex-shrink: 0;
+  max-width: 40vw;
+}
+
+.mdv-crumb:hover,
+.mdv-crumb.selected {
+  color: var(--mdv-bar-strong);
+}
+
+.mdv-crumb.focused {
+  color: var(--mdv-bar-strong);
+  outline: 1px solid var(--mdv-focus);
+  outline-offset: -1px;
+}
+
+.mdv-sep {
+  padding: 0 2px;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+/* picker */
+
+.mdv-picker {
+  position: fixed;
+  box-sizing: border-box;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--mdv-picker-bg);
+  color: var(--mdv-fg);
+  border: 1px solid var(--mdv-picker-border);
+  box-shadow: 0 2px 8px var(--mdv-shadow);
+  font-size: 13px;
+  line-height: 22px;
+  z-index: 1001;
+  user-select: none;
+}
+
+.mdv-list {
+  overflow: auto;
+  padding: 2px 0;
+}
+
+.mdv-row {
+  height: 22px;
+  padding-left: calc(8px + var(--indent, 0px));
+  padding-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.mdv-row.hidden {
+  display: none;
+}
+
+.mdv-row:hover {
+  background: var(--mdv-hover-bg);
+}
+
+.mdv-row.selected {
+  background: var(--mdv-sel-bg);
+  color: var(--mdv-sel-fg);
+  outline: 1px solid var(--mdv-focus);
+  outline-offset: -1px;
+}
+
+.mdv-row.match {
+  color: var(--mdv-match);
+}
+
+.mdv-row.selected.match {
+  color: var(--mdv-sel-fg);
+}
+
+.mdv-row-muted {
+  color: var(--mdv-muted);
+  cursor: default;
+}
+
+.mdv-row-dir::before {
+  content: "▸ ";
+  opacity: 0.7;
+}
+
+.mdv-filter {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--mdv-border);
+}
+
+.mdv-filter-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 2px 6px;
+  font: inherit;
+  color: var(--mdv-fg);
+  background: var(--mdv-bg);
+  border: 1px solid var(--mdv-border);
+  outline: none;
+}
+
+.mdv-filter-input:focus {
+  border-color: var(--mdv-focus);
+}
+
+/* rendered markdown, close to the VS Code preview */
+
+.mdv-content {
+  box-sizing: border-box;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 40px 20px 60vh;
+}
+
+.mdv-content h1,
+.mdv-content h2,
+.mdv-content h3,
+.mdv-content h4,
+.mdv-content h5,
+.mdv-content h6 {
+  font-weight: 600;
+  margin-top: 24px;
+  margin-bottom: 16px;
+  line-height: 1.25;
+  scroll-margin-top: 32px;
+}
+
+.mdv-content h1 {
+  font-size: 2em;
+  margin-top: 0;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--mdv-border);
+}
+
+.mdv-content h2 {
+  font-size: 1.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--mdv-border);
+}
+
+.mdv-content h3 {
+  font-size: 1.25em;
+}
+
+.mdv-content h4 {
+  font-size: 1em;
+}
+
+.mdv-content h5 {
+  font-size: 0.875em;
+}
+
+.mdv-content h6 {
+  font-size: 0.85em;
+  color: var(--mdv-muted);
+}
+
+.mdv-content p,
+.mdv-content blockquote,
+.mdv-content ul,
+.mdv-content ol,
+.mdv-content table,
+.mdv-content pre {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.mdv-content ul,
+.mdv-content ol {
+  padding-left: 2em;
+}
+
+.mdv-content li {
+  margin: 2px 0;
+}
+
+.mdv-content li > p {
+  margin-bottom: 4px;
+}
+
+.mdv-content li ul,
+.mdv-content li ol {
+  margin-bottom: 0;
+}
+
+.mdv-content li.mdv-task {
+  list-style: none;
+  margin-left: -1.5em;
+}
+
+.mdv-task-box {
+  margin: 0 0.4em 0 0;
+  vertical-align: middle;
+}
+
+.mdv-content a {
+  color: var(--mdv-link);
+  text-decoration: none;
+}
+
+.mdv-content a:hover {
+  text-decoration: underline;
+}
+
+.mdv-content blockquote {
+  margin-left: 0;
+  margin-right: 0;
+  padding: 0 16px;
+  border-left: 5px solid var(--mdv-blockquote);
+  color: var(--mdv-muted);
+}
+
+.mdv-content code {
+  font-family: "Droid Sans Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.mdv-content :not(pre) > code {
+  padding: 1px 4px;
+  background: var(--mdv-code-bg);
+  border-radius: 3px;
+}
+
+.mdv-content pre {
+  padding: 16px;
+  overflow: auto;
+  background: var(--mdv-code-bg);
+  border: 1px solid var(--mdv-border);
+  border-radius: 3px;
+  line-height: 1.45;
+}
+
+.mdv-content pre code {
+  padding: 0;
+  background: none;
+}
+
+.mdv-content table {
+  border-collapse: collapse;
+  max-width: 100%;
+  display: block;
+  overflow: auto;
+}
+
+.mdv-content th,
+.mdv-content td {
+  padding: 5px 10px;
+  border: 1px solid var(--mdv-border);
+  text-align: left;
+}
+
+.mdv-content th {
+  font-weight: 600;
+}
+
+.mdv-content img {
+  max-width: 100%;
+}
+
+.mdv-content hr {
+  border: 0;
+  height: 2px;
+  border-bottom: 2px solid var(--mdv-border);
+}
+
+.mdv-content .mdv-flash {
+  animation: mdv-flash 1.2s ease-out;
+}
+
+@keyframes mdv-flash {
+  from {
+    background: var(--mdv-flash);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+/* mermaid */
+
+.mdv-mermaid {
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.mdv-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mdv-mermaid.mdv-diagram-error pre {
+  border-color: #c72e2e;
+}
+
+.mdv-diagram-message {
+  color: #e05a5a;
+  font-family: "Droid Sans Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+/* highlight.js tokens, VS Code light and dark plus colours */
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--hl-comment);
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-link,
+.hljs-doctag {
+  color: var(--hl-keyword);
+}
+
+.hljs-string,
+.hljs-attr,
+.hljs-addition,
+.hljs-regexp,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: var(--hl-string);
+}
+
+.hljs-number,
+.hljs-built_in,
+.hljs-type,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-meta,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--hl-number);
+}
+
+.hljs-title,
+.hljs-name,
+.hljs-title.function_,
+.hljs-title.class_ {
+  color: var(--hl-title);
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attribute,
+.hljs-property,
+.hljs-params {
+  color: var(--hl-variable);
+}
+
+.hljs-deletion {
+  color: #c72e2e;
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: bold;
+}
