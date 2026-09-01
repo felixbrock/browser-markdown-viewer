@@ -149,6 +149,13 @@ class Session {
     const result = await this.send("Page.captureScreenshot", { format: "png" });
     writeFileSync(join(out, name), Buffer.from(result.data, "base64"));
   }
+  // the back or forward button on a mouse
+  async mouseButton(button) {
+    const buttons = button === "back" ? 8 : 16;
+    await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: 400, y: 300, button, buttons, clickCount: 1 });
+    await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 400, y: 300, button, buttons: 0, clickCount: 1 });
+    await sleep(400);
+  }
   close() {
     this.ws.close();
   }
@@ -347,6 +354,34 @@ try {
   await sleep(400);
   check("search previews leave no history entries", (await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)")).slice(-1)[0] === "### Queue");
 
+  // the browser back and forward buttons walk the same positions
+  const sentinels = await session.evaluate(
+    "({ state: history.state?.mdv, len: history.length, first: (navigation.entries()[0].getState() || {}).mdv, last: (navigation.entries()[navigation.entries().length - 1].getState() || {}).mdv, index: navigation.currentEntry.index })"
+  );
+  check(
+    "spare entries surround the current one and hash clicks add none",
+    sentinels.state === "cur" && sentinels.first === "back" && sentinels.last === "fwd" && sentinels.len === 3 && sentinels.index === 1,
+    sentinels
+  );
+  const queuePosition = await session.evaluate("window.scrollY");
+  await session.mouseButton("back");
+  const afterMouseBack = await session.evaluate("window.scrollY");
+  check("the mouse back button returns to the previous position", Math.abs(afterMouseBack - smallMove) <= 4, { smallMove, afterMouseBack });
+  await session.mouseButton("forward");
+  check("the mouse forward button goes forward again", Math.abs((await session.evaluate("window.scrollY")) - queuePosition) <= 4);
+  await session.mouseButton("forward");
+  const forwardExhausted = await session.evaluate("({ y: window.scrollY, state: history.state?.mdv, index: navigation.currentEntry.index })");
+  check("forward with nothing ahead changes nothing", Math.abs(forwardExhausted.y - queuePosition) <= 4 && forwardExhausted.state === "cur" && forwardExhausted.index === 1, forwardExhausted);
+  for (let step = 0; step < 10; step++) {
+    await session.mouseButton("back");
+  }
+  const backExhausted = await session.evaluate("({ state: history.state?.mdv, index: navigation.currentEntry.index, url: location.href })");
+  check(
+    "back with nothing left stays on a page the tab has no history for",
+    backExhausted.state === "cur" && backExhausted.index === 1 && backExhausted.url.startsWith(fileUrl),
+    backExhausted
+  );
+
   // space on a crumb reveals without a picker
   await session.evaluate("window.scrollTo(0, 0)");
   await sleep(200);
@@ -399,6 +434,20 @@ try {
   const otherCrumbs = await other.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)");
   check("path crumbs " + (args.git ? "start below the git root" : "show the full path"), args.git ? otherCrumbs[0] === "nested" : otherCrumbs[0] === "tmp", otherCrumbs);
   await other.screenshot("05-other.png");
+  // back with no position left leaves for the page the tab visited before.
+  // A real page, Chromium refuses history.go onto an about:blank entry.
+  writeFileSync(join(out, "docs", "plain.html"), "<title>plain</title><p>not markdown</p>\n");
+  await other.evaluate(`location.href = ${JSON.stringify("file://" + join(out, "docs", "plain.html"))}`);
+  await sleep(800);
+  await other.evaluate(`location.href = ${JSON.stringify("file://" + join(out, "docs", "nested", "other.md"))}`);
+  await waitFor(other, "document.querySelector('.mdv-content h1') !== null", 8000);
+  // the ctrl+t check left its new tab active, mouse buttons act on the active tab
+  await fetch(`http://127.0.0.1:${port}/json/activate/${otherTarget.id}`);
+  await sleep(400);
+  await other.mouseButton("back");
+  await sleep(800);
+  const leftFor = (await targets()).find((t) => t.id === otherTarget.id);
+  check("back with nothing left leaves for the previously visited page", leftFor !== undefined && leftFor.url.endsWith("plain.html"), { url: leftFor?.url });
   other.close();
   session.close();
 } catch (error) {

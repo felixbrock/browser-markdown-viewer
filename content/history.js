@@ -4,7 +4,8 @@
 // entry, so do big manual moves, small moves update the current entry in
 // place. While the section search previews sections nothing is recorded. With
 // no entry left in a direction the key is left to the browser, which then
-// walks its own page history.
+// walks its own page history. The browser back and forward buttons, toolbar
+// and mouse alike, walk the same positions, see armTraversal below.
 
 (() => {
   "use strict";
@@ -29,6 +30,70 @@
       window.addEventListener("scroll", () => this.onScroll(), { passive: true });
       window.addEventListener("keydown", (event) => this.onKeyDown(event), true);
       window.addEventListener("hashchange", () => this.record());
+      this.armTraversal();
+    }
+
+    // The browser back and forward buttons walk the position history too. The
+    // buttons only fire when the tab has a history entry on that side, so one
+    // spare entry is kept on each side of the current one. The navigate
+    // handler cancels the traversal onto a spare entry and moves through the
+    // positions instead. With no position left the jump goes one entry past
+    // the spare one, to the page the tab really visited before, and when there
+    // is no such page the browser ignores the jump.
+    armTraversal() {
+      if (!window.navigation) {
+        return;
+      }
+      window.navigation.addEventListener("navigate", (event) => this.onNavigate(event));
+      if (history.state && history.state.mdv === "cur") {
+        // reloaded, the spare entries of the earlier visit are still in place
+        return;
+      }
+      const mark = (mdv) => {
+        try {
+          window.navigation.updateCurrentEntry({ state: { mdv } });
+        } catch {
+          // without the marker the entry is not recognised as a spare one
+        }
+      };
+      history.replaceState({ mdv: "back" }, "");
+      mark("back");
+      history.pushState({ mdv: "cur" }, "");
+      mark("cur");
+      history.pushState({ mdv: "fwd" }, "");
+      mark("fwd");
+      history.back();
+    }
+
+    onNavigate(event) {
+      if (event.navigationType !== "traverse" || !event.userInitiated || !event.cancelable) {
+        return;
+      }
+      const current = window.navigation.currentEntry;
+      if (!current || current.index < 0 || event.destination.index < 0) {
+        return;
+      }
+      const delta = event.destination.index - current.index;
+      if (delta === 0) {
+        return;
+      }
+      if (delta < 0 ? this.back() : this.forward()) {
+        event.preventDefault();
+        return;
+      }
+      let destinationState = null;
+      try {
+        destinationState = event.destination.getState();
+      } catch {
+        // a disposed entry, leave the traversal to the browser
+      }
+      if (destinationState && destinationState.mdv) {
+        event.preventDefault();
+        const jump = delta < 0 ? delta - 1 : delta + 1;
+        // queued because a jump issued while the canceled traversal is still
+        // being torn down gets dropped
+        window.setTimeout(() => history.go(jump), 0);
+      }
     }
 
     get current() {

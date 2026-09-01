@@ -468,8 +468,10 @@
     }
     pollOnce(true).then(() => {
       if (message.hash) {
-        location.hash = message.hash;
-        scrollToHash();
+        const url = new URL(location.href);
+        url.hash = message.hash;
+        history.replaceState(history.state, "", url.href);
+        state.history.jump(() => scrollToHash());
       }
       sendResponse({ ok: true });
     });
@@ -531,6 +533,18 @@
         state.breadcrumbs.pinUntil = 0;
         state.breadcrumbs.update(true);
       }
+    });
+    // Hash links jump through the position history. The hash is replaced in
+    // place, a native hash click would add a tab history entry and detach the
+    // spare entries the browser back and forward buttons rely on.
+    content.addEventListener("click", (event) => {
+      const link = event.target instanceof Element ? event.target.closest('a[href^="#"]') : null;
+      if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      event.preventDefault();
+      history.replaceState(history.state, "", link.getAttribute("href"));
+      state.history.jump(() => scrollToHash());
     });
   }
 
