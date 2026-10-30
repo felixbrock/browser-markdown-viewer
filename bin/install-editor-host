@@ -3,8 +3,9 @@
 
 Chromium looks for user level hosts in <config dir>/NativeMessagingHosts,
 where the config dir is the browser's folder under $XDG_CONFIG_HOME (default
-~/.config), so this writes browser_markdown_viewer.json there for every
-Chromium based browser found (Brave, Chrome, Chromium). The manifest names
+~/.config) on Linux and under ~/Library/Application Support on macOS, so this
+writes browser_markdown_viewer.json there for every Chromium based browser
+found (Brave, Chrome, Chromium). The manifest names
 the extension id, which Chromium derives from the folder the extension was
 loaded from. The id is read from the browser's Preferences when the extension
 is installed there, otherwise computed from this folder's path.
@@ -23,10 +24,11 @@ import subprocess
 import sys
 
 HOST_NAME = "browser_markdown_viewer"
+MACOS = sys.platform == "darwin"
 BROWSERS = [
     ("Brave", "BraveSoftware/Brave-Browser"),
-    ("Chrome", "google-chrome"),
-    ("Chromium", "chromium"),
+    ("Chrome", "Google/Chrome" if MACOS else "google-chrome"),
+    ("Chromium", "Chromium" if MACOS else "chromium"),
 ]
 
 
@@ -81,7 +83,10 @@ def main():
         print(f"{host_path} does not answer a ping, check that python3 runs", file=sys.stderr)
         return 1
     written = 0
-    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    if MACOS:
+        config_home = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    else:
+        config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
     for label, subdir in BROWSERS:
         root = os.path.join(config_home, subdir)
         if not os.path.isdir(root):

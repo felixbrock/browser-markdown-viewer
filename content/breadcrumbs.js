@@ -10,6 +10,11 @@
 // move the picker to the neighbouring crumb, ctrl+f opens the filter box,
 // escape returns to the page. The outline opens collapsed apart from the path
 // to the current heading, like VS Code's collapseByDefault picker.
+//
+// macOS swaps the modifiers like VS Code does there, see content/keys.js.
+// cmd+f and cmd+enter stand for ctrl+f and ctrl+enter, option+left and
+// option+right move the picker to the neighbouring crumb. Inside the picker
+// cmd+left and cmd+up act as home, cmd+right and cmd+down act as end.
 
 (() => {
   "use strict";
@@ -701,16 +706,27 @@
         this.focusAndSelect();
         return;
       }
-      if (!this.active || event.altKey) {
+      if (!this.active) {
+        return;
+      }
+      const keys = window.MdvKeys;
+      const arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
+      const step = arrow && keys.crumbStep(event);
+      // alt belongs to the position history, on macOS apart from option+arrow
+      if (event.altKey && !step) {
         return;
       }
       const inFilter = this.filterInput !== null && event.target === this.filterInput;
       const inPicker = this.pickerFor !== null;
       const plain = !event.ctrlKey && !event.altKey && !event.metaKey;
-      const ctrl = event.ctrlKey && !event.altKey && !event.metaKey;
+      const primary = keys.primary(event);
+      let key = event.key;
+      if (keys.IS_MAC && primary && inPicker) {
+        key = { ArrowLeft: "Home", ArrowUp: "Home", ArrowRight: "End", ArrowDown: "End" }[key] || key;
+      }
       let handled = true;
 
-      switch (event.key) {
+      switch (key) {
         case "Escape":
           if (this.filterInput) {
             this.closeFilter();
@@ -721,7 +737,7 @@
         case "ArrowLeft":
           if (inFilter) {
             handled = false;
-          } else if (!inPicker || ctrl) {
+          } else if (!inPicker || step) {
             this.focusPrevious();
           } else {
             this.collapseOrParent();
@@ -730,7 +746,7 @@
         case "ArrowRight":
           if (inFilter) {
             handled = false;
-          } else if (!inPicker || ctrl) {
+          } else if (!inPicker || step) {
             this.focusNext();
           } else {
             this.expandOrFirstChild();
@@ -780,12 +796,12 @@
           break;
         case "Enter":
           if (inPicker) {
-            if (event.ctrlKey) {
+            if (primary) {
               this.openRowAside();
             } else {
               this.pickRow();
             }
-          } else if (event.ctrlKey) {
+          } else if (primary) {
             this.revealFocusedAside();
           } else {
             this.selectFocused();
@@ -802,7 +818,7 @@
           break;
         case "f":
         case "F":
-          if (ctrl && !event.shiftKey && inPicker) {
+          if (primary && !event.shiftKey && inPicker) {
             this.openFilter();
           } else {
             handled = false;

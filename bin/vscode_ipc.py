@@ -3,10 +3,12 @@
 The code CLI is a shell script that starts a whole Electron process, which
 then connects to the socket of the running VS Code, hands over the arguments
 and quits, about a second of work. This module connects to that socket
-directly, the same call the CLI makes, in a few milliseconds. The socket sits
-in $XDG_RUNTIME_DIR as vscode-<hash>-<version>-main.sock, the hash is the
-start of the sha256 of the user data dir, the version the start of the VS Code
-version.
+directly, the same call the CLI makes, in a few milliseconds. On Linux the
+socket sits in $XDG_RUNTIME_DIR as vscode-<hash>-<version>-main.sock, the hash
+is the start of the sha256 of the user data dir, the version the start of the
+VS Code version. Without $XDG_RUNTIME_DIR, the normal case on macOS, it sits in
+the user data dir as <version>-main.sock. The user data dir is
+~/.config/Code on Linux and ~/Library/Application Support/Code on macOS.
 
 Wire format, read from the ipc.net and ipc modules of VS Code 1.136
     frame      type (1 byte, 1 is a regular message), id (4 bytes), ack (4 bytes),
@@ -29,6 +31,7 @@ import json
 import os
 import socket
 import struct
+import sys
 
 USER_DATA_DIRS = ["Code", "Code - Insiders", "VSCodium", "Code - OSS"]
 REGULAR = 1
@@ -112,7 +115,10 @@ def deserialize(buf, pos=0):
 
 def main_sockets():
     """Candidate main sockets of running or crashed VS Code instances, the stable build first."""
-    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    if sys.platform == "darwin":
+        config_home = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    else:
+        config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     found = []
     for name in USER_DATA_DIRS:

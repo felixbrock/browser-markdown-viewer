@@ -2,7 +2,12 @@
 // Smoke test in a throwaway headless Brave (or Chrome) profile, driven over the
 // DevTools protocol. Needs node 22 or newer, no packages.
 //
-//   node scripts/smoke-test.mjs --file /path/to/note.md [--browser /opt/brave/brave] [--port 9444] [--out /tmp/mdv-test]
+//   node scripts/smoke-test.mjs --file /path/to/note.md [--browser /opt/brave/brave] [--port 9444] [--out /tmp/mdv-test] [--mac 1]
+//
+// --mac 1 makes the page report macOS (DevTools platform override) and presses
+// the macOS keys from content/keys.js, cmd in place of ctrl, option+left for
+// the next crumb, cmd+[ and cmd+] for the position history. The ctrl+t
+// command stays, the browser itself keeps its Linux shortcuts.
 //
 // Copies the file into the output folder, loads the extension unpacked, opens the
 // copy, then exercises rendering, the breadcrumb chord, the picker, the filter,
@@ -277,7 +282,9 @@ const launchArgs = [
   ...(args.dark ? ["--force-dark-mode"] : []),
   "--load-extension=" + extensionDir,
   "--remote-debugging-port=" + port,
-  fileUrl
+  // --mac 1 sets the platform override on a blank page first, the content
+  // scripts read the platform at document_start
+  args.mac ? "about:blank" : fileUrl
 ];
 const proc = spawn(browser, launchArgs, { stdio: ["ignore", "pipe", "pipe"], env: hostEnv });
 proc.stderr.on("data", (chunk) => appendFileSync(join(out, "browser.log"), chunk));
@@ -362,6 +369,13 @@ class Session {
 
 const MOD = { alt: 1, ctrl: 2, meta: 4, shift: 8 };
 const CHORD = MOD.ctrl | MOD.shift | MOD.alt | MOD.meta;
+const MAC = Boolean(args.mac);
+const PRIMARY = MAC ? MOD.meta : MOD.ctrl;
+const CRUMB_STEP = MAC ? MOD.alt : MOD.ctrl;
+const HISTORY_BACK = MAC ? ["[", "BracketLeft", 219, MOD.meta] : ["ArrowLeft", "ArrowLeft", 37, MOD.alt];
+const HISTORY_FORWARD = MAC ? ["]", "BracketRight", 221, MOD.meta] : ["ArrowRight", "ArrowRight", 39, MOD.alt];
+const PICKER_FIRST = MAC ? ["ArrowLeft", "ArrowLeft", 37, MOD.meta] : ["Home", "Home", 36];
+const PICKER_LAST = MAC ? ["ArrowRight", "ArrowRight", 39, MOD.meta] : ["End", "End", 35];
 
 async function waitFor(session, expression, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
@@ -375,11 +389,20 @@ async function waitFor(session, expression, timeoutMs = 15000) {
 }
 
 try {
-  const target = await waitForTarget((t) => t.type === "page" && t.url.startsWith(fileUrl));
+  const target = await waitForTarget((t) => t.type === "page" && t.url.startsWith(MAC ? "about:blank" : fileUrl));
   const session = new Session(target.webSocketDebuggerUrl);
   await session.ready;
   await session.send("Page.enable");
   await session.send("Runtime.enable");
+  if (MAC) {
+    await session.send("Emulation.setUserAgentOverride", {
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+      platform: "MacIntel",
+      userAgentMetadata: { platform: "macOS", platformVersion: "15.0.0", architecture: "arm", model: "", mobile: false }
+    });
+    await session.send("Page.navigate", { url: fileUrl });
+    check("page reports macOS", await waitFor(session, `location.href.startsWith(${JSON.stringify(fileUrl)}) && navigator.platform === "MacIntel" && navigator.userAgentData?.platform === "macOS"`));
+  }
 
   check("page is a text render", (await session.evaluate("document.contentType")).startsWith("text/"), await session.evaluate("document.contentType"));
   check("rendered content appears", await waitFor(session, "document.querySelector('.mdv-content h1') !== null"));
@@ -463,7 +486,7 @@ try {
 
   // filter with ctrl+f
   await session.key("End", "End", 35, CHORD);
-  await session.key("f", "KeyF", 70, MOD.ctrl);
+  await session.key("f", "KeyF", 70, PRIMARY);
   check("ctrl+f opens the filter", await session.evaluate("document.activeElement?.classList.contains('mdv-filter-input')"));
   await session.send("Input.insertText", { text: "queue" });
   await sleep(150);
@@ -480,13 +503,19 @@ try {
   const crumbCount = await session.evaluate("document.querySelectorAll('.mdv-crumb').length");
   const headingCrumbs = await session.evaluate("document.querySelectorAll('.mdv-crumb-heading').length");
   for (let step = 0; step < headingCrumbs; step++) {
-    await session.key("ArrowLeft", "ArrowLeft", 37, MOD.ctrl);
+    await session.key("ArrowLeft", "ArrowLeft", 37, CRUMB_STEP);
   }
   await sleep(500);
   const dirRows = await session.evaluate("Array.from(document.querySelectorAll('.mdv-row')).map(r => r.textContent)");
   check("file crumb picker lists the folder", dirRows.includes(basename(testFile)) && dirRows.includes("nested/"), { rows: dirRows, crumbCount });
   check("file crumb picker selects the current file", (await session.evaluate("document.querySelector('.mdv-row.selected')?.textContent")) === basename(testFile));
   await session.screenshot("04-folder.png");
+  const edgeRow = "(() => { const rows = Array.from(document.querySelectorAll('.mdv-row:not(.hidden)')); const index = rows.indexOf(document.querySelector('.mdv-row.selected')); return index === rows.length - 1 ? 'last' : index === 0 ? 'first' : index; })()";
+  await session.key(...PICKER_LAST);
+  const afterLast = await session.evaluate(edgeRow);
+  await session.key(...PICKER_FIRST);
+  const afterFirst = await session.evaluate(edgeRow);
+  check((MAC ? "cmd+right and cmd+left" : "end and home") + " select the last and first row", afterLast === "last" && afterFirst === "first", { afterLast, afterFirst });
   await session.key("Escape", "Escape", 27);
   check("escape closes the picker and the bar", await session.evaluate("document.querySelector('.mdv-picker') === null && document.querySelector('.mdv-crumb.focused') === null"));
 
@@ -529,14 +558,14 @@ try {
 
   // alt+left and alt+right walk the position history
   const positionBeforeJump = await session.evaluate("window.scrollY");
-  await session.key("ArrowLeft", "ArrowLeft", 37, MOD.alt);
+  await session.key(...HISTORY_BACK);
   await sleep(400);
   const positionAfterBack = await session.evaluate("window.scrollY");
   check("alt+left returns to the position before the search jump", Math.abs(positionAfterBack - scrollBefore) <= 4 && positionAfterBack !== positionBeforeJump, { positionBeforeJump, positionAfterBack, scrollBefore });
-  await session.key("ArrowRight", "ArrowRight", 39, MOD.alt);
+  await session.key(...HISTORY_FORWARD);
   await sleep(400);
   check("alt+right goes forward again", Math.abs((await session.evaluate("window.scrollY")) - positionBeforeJump) <= 4);
-  await session.key("ArrowRight", "ArrowRight", 39, MOD.alt);
+  await session.key(...HISTORY_FORWARD);
   await sleep(300);
   check("alt+right at the end changes nothing", Math.abs((await session.evaluate("window.scrollY")) - positionBeforeJump) <= 4);
   // a big manual move adds an entry, a small one does not
@@ -545,7 +574,7 @@ try {
   const smallMove = await session.evaluate("window.scrollY");
   await session.evaluate("window.scrollTo(0, 0)");
   await sleep(500);
-  await session.key("ArrowLeft", "ArrowLeft", 37, MOD.alt);
+  await session.key(...HISTORY_BACK);
   await sleep(400);
   check("a big manual move adds an entry, a small one updates in place", Math.abs((await session.evaluate("window.scrollY")) - smallMove) <= 4, { smallMove, now: await session.evaluate("window.scrollY") });
   // anchor links add an entry
@@ -557,7 +586,7 @@ try {
   // file on disk with any front matter
   const queueLine = readFileSync(testFile, "utf8").split("\n").findIndex((text) => /^###\s+Queue\s*$/.test(text)) + 1;
   const requestsBefore = vscodeRequests.length;
-  await session.key("V", "KeyV", 86, MOD.ctrl | MOD.shift);
+  await session.key("V", "KeyV", 86, PRIMARY | MOD.shift);
   // the wait ends on a request at the fake VS Code socket or on a failure
   // notice, whichever comes first, a notice lives long enough to be read here
   const editorDeadline = Date.now() + 8000;
@@ -569,7 +598,7 @@ try {
   const editorRequest = vscodeRequests.length > requestsBefore ? vscodeRequests.at(-1).args[0] : null;
   check("ctrl+shift+v opens the file in the editor at the current line", editorRequest !== null && JSON.stringify(editorRequest) === JSON.stringify({ _: [join(out, "docs"), `${testFile}:${queueLine}:1`], goto: true }), { editorRequest, queueLine });
   check("no failure notice after the jump to the editor", editorNotice === null, { editorNotice });
-  await session.key("ArrowLeft", "ArrowLeft", 37, MOD.alt);
+  await session.key(...HISTORY_BACK);
   await sleep(400);
   check("alt+left returns from an anchor link", Math.abs((await session.evaluate("window.scrollY")) - smallMove) <= 4);
   // previews in the search leave no trace
@@ -580,7 +609,7 @@ try {
   await session.key("ArrowDown", "ArrowDown", 40);
   await session.key("Escape", "Escape", 27);
   await sleep(400);
-  await session.key("ArrowRight", "ArrowRight", 39, MOD.alt);
+  await session.key(...HISTORY_FORWARD);
   await sleep(400);
   check("search previews leave no history entries", (await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)")).slice(-1)[0] === "### Queue");
 
@@ -588,9 +617,10 @@ try {
   const sentinels = await session.evaluate(
     "({ state: history.state?.mdv, len: history.length, first: (navigation.entries()[0].getState() || {}).mdv, last: (navigation.entries()[navigation.entries().length - 1].getState() || {}).mdv, index: navigation.currentEntry.index })"
   );
+  // --mac 1 keeps its about:blank start page as one more entry
   check(
     "spare entries surround the current one and hash clicks add none",
-    sentinels.state === "cur" && sentinels.first === "back" && sentinels.last === "fwd" && sentinels.len === 3 && sentinels.index === 1,
+    sentinels.state === "cur" && sentinels.first === "back" && sentinels.last === "fwd" && sentinels.len === (MAC ? 4 : 3) && sentinels.index === 1,
     sentinels
   );
   const queuePosition = await session.evaluate("window.scrollY");

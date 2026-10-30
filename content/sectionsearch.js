@@ -1,7 +1,8 @@
 // Section search, modelled on VS Code's "Go to Symbol in Editor" quick pick
-// (ctrl+t in Felix's keybindings). Opened through the extension command bound
-// to ctrl+t, see service-worker.js. Type to filter the headings, up and down
-// preview the section under the cursor, enter jumps, escape restores the view.
+// (ctrl+t in Felix's keybindings, cmd+t on macOS). Opened through the
+// extension command bound to that key, see service-worker.js. Type to filter
+// the headings, up and down preview the section under the cursor, enter jumps,
+// escape restores the view.
 
 (() => {
   "use strict";

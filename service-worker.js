@@ -1,7 +1,8 @@
 // Background worker. Four jobs, reuse an already open tab when the same file
 // is opened again (the VS Code binding lands here), read files from disk for
 // live reload, list directories for the folder crumbs, and hand a file and
-// line to the native messaging host on ctrl+shift+v.
+// line to the native messaging host on ctrl+shift+v (cmd+shift+v on
+// macOS).
 
 const LOG_PREFIX = "[browser-markdown-viewer]";
 // registered by bin/install-editor-host, runs bin/editor-host
@@ -167,7 +168,8 @@ function parseDirectoryListing(html) {
   return entries;
 }
 
-// ctrl+t, section search on a markdown tab, a plain new tab everywhere else.
+// ctrl+t (cmd+t on macOS), section search on a markdown tab, a plain new
+// tab everywhere else.
 async function activeTab(tab) {
   if (tab && tab.id !== undefined) {
     return tab;
@@ -192,9 +194,9 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   await chrome.tabs.create({});
 });
 
-// ctrl+shift+v, the host runs code with the file and line and focuses the
-// VS Code window. Chromium reports a missing or mismatched host manifest as
-// an error, the page shows that text.
+// ctrl+shift+v (cmd+shift+v on macOS), the host runs code with the file and
+// line and focuses the VS Code window. Chromium reports a missing or
+// mismatched host manifest as an error, the page shows that text.
 async function openInEditor(message) {
   const reply = await chrome.runtime.sendNativeMessage(EDITOR_HOST, {
     action: "open",

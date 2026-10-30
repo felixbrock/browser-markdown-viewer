@@ -2,20 +2,26 @@
 
 Two things live here. The state file that remembers which VS Code folder a
 markdown file was launched from, written by open-markdown and read by
-editor-host. And the i3 window focusing, i3 runs with
+editor-host. And the window focusing. i3 runs with
 focus_on_window_activation urgent, so an activated window only carries the
-urgency flag and the scripts follow that flag themselves.
+urgency flag and the scripts follow that flag themselves. macOS has no i3,
+activate_app brings an application to the front there.
+
+The scripts run under the python3 of macOS too, which is 3.9, so nothing
+here may need a newer Python.
 """
 
 import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 
 STATE_ENV = "BROWSER_MARKDOWN_VIEWER_STATE"
 MAX_ENTRIES = 500
 POLL_S = 0.1
+MACOS = sys.platform == "darwin"
 
 
 # state file, file path -> folder open in the VS Code window that launched it
@@ -149,3 +155,15 @@ def focus_window(is_app, timeout_s, choose=None):
     chosen = choose(windows) if choose else None
     i3_focus((chosen or windows[0])["id"])
     return True
+
+
+# macOS
+
+
+def activate_app(bundle_id):
+    """Bring the application with `bundle_id` to the front, True when open succeeded.
+
+    macOS raises the frontmost window of the app, the window the app focused last.
+    """
+    result = subprocess.run(["open", "-b", bundle_id], capture_output=True, check=False)
+    return result.returncode == 0

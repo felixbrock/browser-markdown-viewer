@@ -1,11 +1,12 @@
-// Position history for alt+left and alt+right, modelled on VS Code's
-// workbench.action.navigateBack and navigateForward. An entry is a viewport
-// position. Deliberate jumps (picker, section search, anchor links) add an
-// entry, so do big manual moves, small moves update the current entry in
-// place. While the section search previews sections nothing is recorded. With
-// no entry left in a direction the key is left to the browser, which then
-// walks its own page history. The browser back and forward buttons, toolbar
-// and mouse alike, walk the same positions, see armTraversal below.
+// Position history for alt+left and alt+right (cmd+[ and cmd+] on macOS),
+// modelled on VS Code's workbench.action.navigateBack and navigateForward. An
+// entry is a viewport position. Deliberate jumps (picker, section search,
+// anchor links) add an entry, so do big manual moves, small moves update the
+// current entry in place. While the section search previews sections nothing
+// is recorded. With no entry left in a direction the key is left to the
+// browser, which then walks its own page history. The browser back and forward
+// buttons, toolbar and mouse alike, walk the same positions, see armTraversal
+// below.
 
 (() => {
   "use strict";
@@ -224,14 +225,13 @@
       return this.go(1);
     }
 
+    // alt+left and alt+right, cmd+[ and cmd+] on macOS
     onKeyDown(event) {
-      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
-        return;
-      }
+      const step = window.MdvKeys.historyStep(event);
       let handled = false;
-      if (event.key === "ArrowLeft") {
+      if (step < 0) {
         handled = this.back();
-      } else if (event.key === "ArrowRight") {
+      } else if (step > 0) {
         handled = this.forward();
       }
       if (handled) {

@@ -646,7 +646,7 @@
   }
 
   async function boot() {
-    if (!window.markdownit || !window.MdvBreadcrumbs || !window.MdvSectionSearch || !window.MdvHistory) {
+    if (!window.markdownit || !window.MdvKeys || !window.MdvBreadcrumbs || !window.MdvSectionSearch || !window.MdvHistory) {
       log("dependencies missing, leaving the page alone");
       hideStyle.remove();
       return;
@@ -671,11 +671,12 @@
         state.userScrolled = true;
       }
     });
-    // ctrl+shift+v, the same key that opened the file from VS Code takes it back
+    // ctrl+shift+v (cmd+shift+v on macOS), the same key that opened the file
+    // from VS Code takes it back
     window.addEventListener(
       "keydown",
       (event) => {
-        if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || event.code !== "KeyV") {
+        if (!window.MdvKeys.primary(event) || !event.shiftKey || event.code !== "KeyV") {
           return;
         }
         event.preventDefault();

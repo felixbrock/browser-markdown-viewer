@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open a markdown file in the running Brave window and switch i3 to that window.
+"""Open a markdown file in the running browser window and bring that window up.
 
 Used by the VS Code task open_markdown_in_browser, which passes the file and
 the folder open in that VS Code window. The folder lands in the state file
@@ -7,10 +7,13 @@ the folder open in that VS Code window. The folder lands in the state file
 same VS Code window, or reopen the folder when the window is gone, see
 bin/editor-host.
 
-Brave receives the file url and opens it as a tab in its last active window,
-the extension then swaps to an already open tab for the same file. i3 is
-configured with focus_on_window_activation urgent, so the window only gets an
-urgency flag, this script follows that flag and focuses the window.
+On Linux Brave receives the file url and opens it as a tab in its last active
+window, the extension then swaps to an already open tab for the same file. i3
+is configured with focus_on_window_activation urgent, so the window only gets
+an urgency flag, this script follows that flag and focuses the window.
+
+On macOS Google Chrome gets the url through open -a, which also brings Chrome
+to the front, the extension swaps tabs the same way.
 """
 
 import os
@@ -23,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import mdv_common  # noqa E402
 
 FOCUS_TIMEOUT_S = 1.5
+MAC_BROWSER = "Google Chrome"
 
 
 def is_brave(node):
@@ -46,6 +50,9 @@ def main():
         except OSError as error:
             print(f"could not record the workspace folder, {error}", file=sys.stderr)
     url = "file://" + urllib.parse.quote(path)
+    if mdv_common.MACOS:
+        result = subprocess.run(["open", "-a", MAC_BROWSER, url], check=False)
+        return result.returncode
     brave = shutil.which("brave") or "/opt/brave/brave"
     subprocess.Popen(
         [brave, url],

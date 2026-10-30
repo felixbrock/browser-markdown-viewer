@@ -1,6 +1,6 @@
 # Browser Markdown Viewer
 
-Unpacked Chromium extension (Brave, Chrome) that renders local markdown files in the browser, with a VS Code style breadcrumb bar for jumping between sections. Built to replace the VS Code markdown preview, `ctrl+shift+v` in VS Code opens the current file in the running Brave window, `ctrl+shift+v` in the browser goes back to VS Code at the section being read.
+Unpacked Chromium extension (Brave, Chrome) that renders local markdown files in the browser, with a VS Code style breadcrumb bar for jumping between sections. Built to replace the VS Code markdown preview, `ctrl+shift+v` in VS Code opens the current file in the running browser window, `ctrl+shift+v` in the browser goes back to VS Code at the section being read. Runs on Linux with Brave and i3, and on macOS with Chrome, where `cmd` takes the place of `ctrl` (see [macOS](#macos)).
 
 ## What it does
 
@@ -35,9 +35,43 @@ Same steps in Chrome at `chrome://extensions`. After editing the extension files
 
 `Ctrl+T` keeps opening a new tab on every page without the viewer, the extension opens that tab itself. Only on rendered markdown pages it opens the section search instead.
 
+## macOS
+
+Same extension and scripts in Chrome on macOS, with these differences.
+
+- Install
+  - Load the folder at `chrome://extensions` as in the Brave steps, with `Allow access to file URLs`
+  - Type `Cmd+T` into `Go to section` on `chrome://extensions/shortcuts`
+  - Run `bin/install-editor-host`, then press the reload icon of the extension
+  - The host manifest lands in `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` (`Chromium` and `BraveSoftware/Brave-Browser` likewise)
+- Python
+  - Chrome starts the host with a bare `PATH`, so the scripts run on `/usr/bin/python3`, which is 3.9 on macOS
+  - Nothing in `bin/` may need a newer Python
+- Opening
+  - `bin/open-markdown` runs `open -a "Google Chrome" <url>`, `open` also brings Chrome to the front
+  - `MAC_BROWSER` at the top of the script names the app
+- Back to VS Code
+  - The main socket sits in the VS Code user data dir as `~/Library/Application Support/Code/<version>-main.sock`
+  - The `code` fallback also looks in `/opt/homebrew/bin` and inside `Visual Studio Code.app`
+  - The host brings VS Code to the front with `open -b com.microsoft.VSCode`
+- Keys
+  - The page reads the platform from `navigator.userAgentData.platform`, see `content/keys.js`
+  - `cmd` takes the place of `ctrl`, as in the VS Code defaults on macOS
+
+| Linux | macOS |
+| --- | --- |
+| `ctrl+t` | `cmd+t` |
+| `ctrl+shift+v` | `cmd+shift+v` |
+| `ctrl+enter` | `cmd+enter` |
+| `ctrl+f` in the picker | `cmd+f` |
+| `ctrl+left`, `ctrl+right` in the picker | `option+left`, `option+right` |
+| `home`, `end` in the picker | `cmd+left` or `cmd+up`, `cmd+right` or `cmd+down`, plain `home` and `end` work too |
+| `alt+left`, `alt+right` | `cmd+[`, `cmd+]` |
+| `ctrl+shift+alt+meta+end` | same chord |
+
 ## VS Code binding
 
-`bin/open-markdown <file> [<workspace folder>]` opens the file in Brave and switches i3 to the Brave window (i3 uses `focus_on_window_activation urgent`, so the script follows the urgency flag). The folder is the one open in the VS Code window, the script records it under `~/.local/state/browser-markdown-viewer/workspaces.json` so the way back can find that window again.
+`bin/open-markdown <file> [<workspace folder>]` opens the file in Brave and switches i3 to the Brave window (i3 uses `focus_on_window_activation urgent`, so the script follows the urgency flag). The folder is the one open in the VS Code window, the script records it under `~/.local/state/browser-markdown-viewer/workspaces.json` so the way back can find that window again. On macOS the script runs `open -a "Google Chrome"` instead, see [macOS](#macos).
 
 User `tasks.json`, the second task serves windows without a folder, where `${workspaceFolder}` has no value
 
@@ -91,7 +125,7 @@ User `tasks.json`, the second task serves windows without a folder, where `${wor
 
 ## Back to VS Code
 
-`ctrl+shift+v` on a rendered page opens the file in VS Code at the line being read and switches i3 to that VS Code window.
+`ctrl+shift+v` on a rendered page opens the file in VS Code at the line being read and switches i3 to that VS Code window. On macOS the key is `cmd+shift+v`, and `open -b` brings VS Code to the front.
 
 - Source line
   - Every block element carries the line it starts on in the markdown source, as the VS Code preview does (`data-line`)
@@ -99,12 +133,12 @@ User `tasks.json`, the second task serves windows without a folder, where `${wor
   - Front matter is hidden in the page but counted, the line matches the file on disk
 - Native messaging host
   - Extension pages cannot start programs, so the worker sends `{action, url, line, column}` to `bin/editor-host` over Chromium native messaging
-  - The browser starts the host from a manifest in `~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/` (`google-chrome` and `chromium` likewise), `bin/install-editor-host` writes it with the extension id read from the browser preferences
+  - The browser starts the host from a manifest in `~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/` (`google-chrome` and `chromium` likewise, on macOS the browser folders under `~/Library/Application Support/`), `bin/install-editor-host` writes it with the extension id read from the browser preferences
   - The manifest lives in the browser config dir under `XDG_CONFIG_HOME`, never in a profile given with `--user-data-dir`
 - Editor command
   - The host asks the running VS Code for the equivalent of `code <folder> --goto <file>:<line>:<column>`
   - The folder is the one recorded at launch by `bin/open-markdown`, failing that the enclosing git repository, failing that none
-  - The ask goes straight to the main socket of the running VS Code (`$XDG_RUNTIME_DIR/vscode-<hash>-<version>-main.sock`, the socket the `code` CLI itself connects to), so the round trip takes a few milliseconds, `bin/vscode_ipc.py` speaks the wire format
+  - The ask goes straight to the main socket of the running VS Code (`$XDG_RUNTIME_DIR/vscode-<hash>-<version>-main.sock`, on macOS `~/Library/Application Support/Code/<version>-main.sock`, the socket the `code` CLI itself connects to), so the round trip takes a few milliseconds, `bin/vscode_ipc.py` speaks the wire format
   - Without a reachable socket the host runs the `code` CLI instead, which starts a whole Electron process first and takes about a second, and which also starts VS Code when none runs
   - VS Code reuses the window with that folder open, or opens the folder in a new window with the file, so the file lands in the right session and never in whatever window was active last
   - The host then follows the urgency flag of the VS Code window and focuses it, preferring the window whose title names the folder or the file
@@ -113,7 +147,7 @@ User `tasks.json`, the second task serves windows without a folder, where `${wor
 
 ## Keys
 
-Mirrors the VS Code breadcrumb commands and the VS Code list defaults, verified against VS Code 1.133. The activation chord sits at the top of `content/breadcrumbs.js` (`FOCUS_AND_SELECT`).
+Mirrors the VS Code breadcrumb commands and the VS Code list defaults, verified against VS Code 1.133. The activation chord sits at the top of `content/breadcrumbs.js` (`FOCUS_AND_SELECT`). The tables list the Linux keys, the macOS keys sit in a table under [macOS](#macos).
 
 Anywhere on the page
 
@@ -171,17 +205,18 @@ The search opens with the current heading selected. Each result shows its parent
 
 - `manifest.json` runs the content scripts on `file:///*` urls ending in a markdown extension
 - `service-worker.js` reuses open tabs, reads files for live reload, lists folders for the path crumbs, forwards the `ctrl+t` command or opens a new tab, hands a file and line to the native messaging host on `ctrl+shift+v`
+- `content/keys.js` platform modifiers, ctrl on Linux and cmd on macOS
 - `content/viewer.js` replaces the plain text page with rendered markdown, mermaid, highlighting, scroll restore, polling, source line tracking and the `ctrl+shift+v` key
 - `content/breadcrumbs.js` bar, picker, filter, key handling
 - `content/sectionsearch.js` the section search quick pick
-- `content/history.js` position history for alt+left, alt+right and the browser back and forward buttons
+- `content/history.js` position history for alt+left, alt+right (cmd+[ and cmd+] on macOS) and the browser back and forward buttons
 - `content/viewer.css` page and bar styles, light and dark
 - `vendor/` markdown-it 15, highlight.js 11 (common languages build), mermaid 11, licenses next to them
 - `bin/open-markdown` helper used by the VS Code task, records the workspace folder
 - `bin/editor-host` native messaging host, opens the file in VS Code at a line and focuses the window
 - `bin/vscode_ipc.py` the VS Code main socket protocol, sends the launch request the `code` CLI would send
 - `bin/install-editor-host` writes the host manifest into the browser config dirs
-- `bin/mdv_common.py` state file and i3 helpers shared by the two scripts
+- `bin/mdv_common.py` state file, i3 helpers and the macOS app activation shared by the two scripts
 - `scripts/smoke-test.mjs` end to end test in a throwaway headless profile
 
 ## Smoke test
@@ -192,6 +227,12 @@ node scripts/smoke-test.mjs --file /home/felix/repos/notes/notes/job/search/inte
 
 Launches a throwaway headless Brave with the extension loaded (the `Ctrl+T` assignment seeded into the profile, the unpacked extension id is derived from the folder path), drives it over the DevTools protocol, checks rendering, diagrams, the `data-color-mode` theme mark, anchors, the chord, picker, tree keys, filter, folder crumb, section search, position history, live reload, tab reuse and the way back to VS Code, and writes screenshots to `--out`. Pass `--browser` for another Chromium binary. Felix's own Brave profile is never touched.
 
+The test runs on Linux. `--mac 1` runs the same checks with the macOS keys, the browser emulates a Mac platform over the DevTools protocol so the page picks the macOS set. The scripts in `bin/` still take their Linux paths in that mode.
+
+```bash
+node scripts/smoke-test.mjs --file /home/felix/repos/notes/notes/job/search/interview_prep/system_design_interview.md --git 1 --dark 1 --mac 1 --out /tmp/mdv-smoke-mac
+```
+
 The way back runs against a fake VS Code main socket served by the test (it answers the handshake and records every launch request) and a stub editor that records its arguments, `XDG_CONFIG_HOME` points into `--out` so the host manifest seeded there is the one the browser finds, and the host reads the overrides below. Five direct host checks (ping, recorded folder over the socket, CLI fallback with a dead socket path, git root fallback, missing file) run before the browser starts, then `ctrl+shift+v` in the page must reach the fake socket with the line of the heading just jumped to.
 
 | Variable | Does |
@@ -199,7 +240,7 @@ The way back runs against a fake VS Code main socket served by the test (it answ
 | `BROWSER_MARKDOWN_VIEWER_SOCKET` | VS Code main socket to use instead of the discovered ones |
 | `BROWSER_MARKDOWN_VIEWER_EDITOR` | command to run instead of `code` |
 | `BROWSER_MARKDOWN_VIEWER_STATE` | state file instead of the one under `~/.local/state` |
-| `BROWSER_MARKDOWN_VIEWER_NO_FOCUS` | set to skip the i3 focusing |
+| `BROWSER_MARKDOWN_VIEWER_NO_FOCUS` | set to skip the window focusing |
 
 ## Notes
 
