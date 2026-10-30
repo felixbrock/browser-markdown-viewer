@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Register bin/editor-host as the native messaging host of the unpacked extension.
+
+Chromium looks for user level hosts in <config dir>/NativeMessagingHosts,
+where the config dir is the browser's folder under $XDG_CONFIG_HOME (default
+~/.config), so this writes browser_markdown_viewer.json there for every
+Chromium based browser found (Brave, Chrome, Chromium). The manifest names
+the extension id, which Chromium derives from the folder the extension was
+loaded from. The id is read from the browser's Preferences when the extension
+is installed there, otherwise computed from this folder's path.
+
+    bin/install-editor-host [<extension folder>]
+
+Run it once, then reload the extension on the browser's extensions page.
+"""
+
+import glob
+import hashlib
+import json
+import os
+import struct
+import subprocess
+import sys
+
+HOST_NAME = "browser_markdown_viewer"
+BROWSERS = [
+    ("Brave", "BraveSoftware/Brave-Browser"),
+    ("Chrome", "google-chrome"),
+    ("Chromium", "chromium"),
+]
+
+
+def derived_id(path):
+    digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:32]
+    return "".join(chr(ord("a") + int(char, 16)) for char in digest)
+
+
+def installed_ids(profile_root, extension_dir):
+    ids = set()
+    for name in ("Preferences", "Secure Preferences"):
+        for prefs_path in glob.glob(os.path.join(profile_root, "*", name)):
+            try:
+                with open(prefs_path, encoding="utf-8") as handle:
+                    prefs = json.load(handle)
+            except (OSError, ValueError):
+                continue
+            settings = prefs.get("extensions", {}).get("settings", {})
+            for extension_id, entry in settings.items():
+                if isinstance(entry, dict) and entry.get("path") == extension_dir:
+                    ids.add(extension_id)
+    return ids
+
+
+def ping(host_path):
+    body = json.dumps({"action": "ping"}).encode("utf-8")
+    result = subprocess.run(
+        [host_path],
+        input=struct.pack("<I", len(body)) + body,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    if result.returncode != 0 or len(result.stdout) < 4:
+        return False
+    length = struct.unpack("<I", result.stdout[:4])[0]
+    try:
+        reply = json.loads(result.stdout[4 : 4 + length])
+    except ValueError:
+        return False
+    return bool(reply.get("ok"))
+
+
+def main():
+    here = os.path.dirname(os.path.realpath(__file__))
+    extension_dir = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.dirname(here)
+    host_path = os.path.join(here, "editor-host")
+    if not os.access(host_path, os.X_OK):
+        print(f"{host_path} is not executable", file=sys.stderr)
+        return 1
+    if not ping(host_path):
+        print(f"{host_path} does not answer a ping, check that python3 runs", file=sys.stderr)
+        return 1
+    written = 0
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    for label, subdir in BROWSERS:
+        root = os.path.join(config_home, subdir)
+        if not os.path.isdir(root):
+            continue
+        ids = installed_ids(root, extension_dir)
+        source = "read from the browser preferences"
+        if not ids:
+            ids = {derived_id(extension_dir)}
+            source = "derived from the folder path, the extension is not loaded in this browser yet"
+        manifest = {
+            "name": HOST_NAME,
+            "description": "Opens markdown files in VS Code for the Browser Markdown Viewer extension",
+            "path": host_path,
+            "type": "stdio",
+            "allowed_origins": [f"chrome-extension://{extension_id}/" for extension_id in sorted(ids)],
+        }
+        target_dir = os.path.join(root, "NativeMessagingHosts")
+        os.makedirs(target_dir, exist_ok=True)
+        target = os.path.join(target_dir, HOST_NAME + ".json")
+        with open(target, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2)
+            handle.write("\n")
+        print(f"{label}, wrote {target}")
+        print(f"  extension id {', '.join(sorted(ids))}, {source}")
+        written += 1
+    if not written:
+        print(f"no Chromium based browser profile found under {config_home}", file=sys.stderr)
+        return 1
+    print("reload the extension on the extensions page, it needs the nativeMessaging permission from manifest.json")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

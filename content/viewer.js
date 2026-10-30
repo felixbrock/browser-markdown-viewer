@@ -1,6 +1,7 @@
 // Content script for local markdown files. Replaces the plain text view with
-// rendered markdown, wires up the breadcrumb bar, renders mermaid fences and
-// re-renders when the file changes on disk.
+// rendered markdown, wires up the breadcrumb bar, renders mermaid fences,
+// re-renders when the file changes on disk, and on ctrl+shift+v hands the
+// file and the source line at the reading position back to VS Code.
 
 (() => {
   "use strict";
@@ -11,6 +12,9 @@
   const POLL_MS = 1000;
   const POLL_FAILURE_LIMIT = 3;
   const SCROLL_STORE_PREFIX = "mdv-scroll:";
+  const NOTICE_MS = 8000;
+  // block tokens without a closing partner that still render an element
+  const SOURCE_LINE_LEAVES = new Set(["fence", "code_block", "hr"]);
 
   if (window.__mdvBooted || location.protocol !== "file:") {
     return;
@@ -37,8 +41,11 @@
     sectionSearch: null,
     history: null,
     content: null,
+    skippedLines: 0,
+    notice: null,
     diagramCache: new Map(),
     diagramCounter: 0,
+    dark: false,
     userScrolled: false,
     polling: false,
     pollFailures: 0,
@@ -72,7 +79,13 @@
       .replace(/"/g, "&quot;");
   }
 
+  // The color mode toggle extension marks file pages with data-color-mode,
+  // the mark wins over the system preference. viewer.css follows the same rule.
   function prefersDark() {
+    const mode = document.documentElement.dataset.colorMode;
+    if (mode === "dark" || mode === "light") {
+      return mode === "dark";
+    }
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   }
 
@@ -111,8 +124,13 @@
     return text;
   }
 
+  // body without the front matter, plus the number of source lines removed
   function stripFrontMatter(text) {
-    return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
+    const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(text);
+    if (!match) {
+      return { body: text, skippedLines: 0 };
+    }
+    return { body: text.slice(match[0].length), skippedLines: match[0].split("\n").length - 1 };
   }
 
   function highlightCode(code, lang) {
@@ -187,12 +205,26 @@
       }
     });
 
+    // Source line of every block element as data-line, zero based like the
+    // token map, VS Code's preview does the same. ctrl+shift+v sends the line
+    // at the reading position to VS Code.
+    md.core.ruler.push("mdv_source_lines", (mdState) => {
+      for (const token of mdState.tokens) {
+        if (!token.map || token.hidden) {
+          continue;
+        }
+        if (token.nesting === 1 || SOURCE_LINE_LEAVES.has(token.type)) {
+          token.attrSet("data-line", String(token.map[0]));
+        }
+      }
+    });
+
     const defaultFence = md.renderer.rules.fence;
     md.renderer.rules.fence = (tokens, index, options, env, self) => {
       const token = tokens[index];
       const lang = (token.info || "").trim().split(/\s+/)[0];
       if (lang === "mermaid") {
-        return '<div class="mdv-mermaid"><pre>' + escapeHtml(token.content) + "</pre></div>\n";
+        return '<div class="mdv-mermaid"' + self.renderAttrs(token) + "><pre>" + escapeHtml(token.content) + "</pre></div>\n";
       }
       return defaultFence(tokens, index, options, env, self);
     };
@@ -201,6 +233,7 @@
   }
 
   function initMermaid() {
+    state.dark = prefersDark();
     if (!window.mermaid) {
       return;
     }
@@ -208,9 +241,22 @@
       startOnLoad: false,
       securityLevel: "strict",
       suppressErrorRendering: true,
-      theme: prefersDark() ? "dark" : "default",
+      theme: state.dark ? "dark" : "default",
       fontFamily: "system-ui, sans-serif"
     });
+  }
+
+  // Diagrams bake the theme into their svg, a theme switch draws them again.
+  function onThemeChange() {
+    if (prefersDark() === state.dark) {
+      return;
+    }
+    state.diagramCache.clear();
+    initMermaid();
+    for (const node of state.content.querySelectorAll(".mdv-mermaid")) {
+      node.classList.remove("mdv-rendered", "mdv-diagram-error");
+    }
+    render(state.text);
   }
 
   async function renderDiagrams() {
@@ -393,10 +439,61 @@
     return true;
   }
 
+  // Source line at the reading position, the last block that starts above it.
+  // One based and counted in the file on disk, front matter included.
+  function currentSourceLine() {
+    let line = null;
+    for (const el of state.content.querySelectorAll("[data-line]")) {
+      const top = el.getBoundingClientRect().top;
+      if (line === null || top <= READING_OFFSET) {
+        line = Number(el.dataset.line);
+      }
+      if (top > READING_OFFSET) {
+        break;
+      }
+    }
+    return (line === null ? 0 : line) + 1 + state.skippedLines;
+  }
+
+  // ctrl+shift+v, the worker hands the file and the line to bin/editor-host,
+  // which runs code and focuses the VS Code window
+  async function openInEditor() {
+    const line = currentSourceLine();
+    let response = null;
+    try {
+      response = await chrome.runtime.sendMessage({ type: "openInEditor", url: hrefWithoutHash(), line, column: 1 });
+    } catch (error) {
+      response = { ok: false, error: String(error?.message || error) };
+    }
+    if (!response || !response.ok) {
+      const reason = response ? response.error : "no reply from the extension";
+      log("open in VS Code failed", reason);
+      showNotice("Open in VS Code failed, " + reason);
+    }
+  }
+
+  function showNotice(text) {
+    if (state.notice) {
+      state.notice.remove();
+    }
+    const notice = createElement("div", "mdv-notice", text);
+    notice.setAttribute("role", "status");
+    document.body.appendChild(notice);
+    state.notice = notice;
+    window.setTimeout(() => {
+      if (state.notice === notice) {
+        notice.remove();
+        state.notice = null;
+      }
+    }, NOTICE_MS);
+  }
+
   function render(text, options = {}) {
     const anchor = options.initial ? null : captureAnchor();
     const env = {};
-    state.content.innerHTML = state.md.render(stripFrontMatter(text), env);
+    const source = stripFrontMatter(text);
+    state.skippedLines = source.skippedLines;
+    state.content.innerHTML = state.md.render(source.body, env);
     state.breadcrumbs.setOutline(collectHeadings());
     if (options.initial) {
       if (!scrollToHash()) {
@@ -574,6 +671,21 @@
         state.userScrolled = true;
       }
     });
+    // ctrl+shift+v, the same key that opened the file from VS Code takes it back
+    window.addEventListener(
+      "keydown",
+      (event) => {
+        if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || event.code !== "KeyV") {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) {
+          openInEditor();
+        }
+      },
+      true
+    );
 
     let scrollStoreTimer = 0;
     window.addEventListener(
@@ -599,13 +711,10 @@
     });
     chrome.runtime.onMessage.addListener(onMessage);
 
-    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-      state.diagramCache.clear();
-      initMermaid();
-      for (const node of state.content.querySelectorAll(".mdv-mermaid")) {
-        node.classList.remove("mdv-rendered", "mdv-diagram-error");
-      }
-      render(state.text);
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", onThemeChange);
+    new MutationObserver(onThemeChange).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-color-mode"]
     });
   }
 

@@ -1,66 +1,45 @@
+/* Every color is a light-dark() pair, color-scheme on the root picks the side.
+   The system preference decides by default. The color mode toggle extension
+   marks file pages with data-color-mode, that mark wins. */
+
 :root {
   color-scheme: light dark;
-  --mdv-bg: #ffffff;
-  --mdv-fg: #1f1f1f;
-  --mdv-muted: #6e6e6e;
-  --mdv-link: #006ab1;
-  --mdv-border: #d4d4d4;
-  --mdv-code-bg: #f3f3f3;
-  --mdv-blockquote: #d0d0d0;
-  --mdv-bar-bg: #f8f8f8;
-  --mdv-bar-fg: #616161;
-  --mdv-bar-strong: #1f1f1f;
-  --mdv-focus: #005fb8;
-  --mdv-picker-bg: #ffffff;
-  --mdv-picker-border: #c8c8c8;
-  --mdv-sel-bg: #e8e8e8;
-  --mdv-sel-fg: #1f1f1f;
-  --mdv-hover-bg: #f0f0f0;
-  --mdv-match: #b58900;
-  --mdv-shadow: rgba(0, 0, 0, 0.16);
-  --mdv-flash: rgba(0, 95, 184, 0.2);
-  --mdv-quick-bg: #f3f3f3;
-  --mdv-input-bg: #ffffff;
-  --mdv-highlight: #0066bf;
-  --hl-comment: #008000;
-  --hl-keyword: #0000ff;
-  --hl-string: #a31515;
-  --hl-number: #098658;
-  --hl-title: #795e26;
-  --hl-variable: #001080;
+  --mdv-bg: light-dark(#ffffff, #000000);
+  --mdv-fg: light-dark(#1f1f1f, #ffffff);
+  --mdv-muted: light-dark(#6e6e6e, #a0a0a0);
+  --mdv-link: light-dark(#006ab1, #3794ff);
+  --mdv-border: light-dark(#d4d4d4, #3c3c3c);
+  --mdv-code-bg: light-dark(#f3f3f3, #0d0d0d);
+  --mdv-blockquote: light-dark(#d0d0d0, #4a4a4a);
+  --mdv-bar-bg: light-dark(#f8f8f8, #000000);
+  --mdv-bar-fg: light-dark(#616161, #a0a0a0);
+  --mdv-bar-strong: light-dark(#1f1f1f, #ffffff);
+  --mdv-focus: light-dark(#005fb8, #f38518);
+  --mdv-picker-bg: light-dark(#ffffff, #0a0a0a);
+  --mdv-picker-border: light-dark(#c8c8c8, #6fc3df);
+  --mdv-sel-bg: light-dark(#e8e8e8, #04395e);
+  --mdv-sel-fg: light-dark(#1f1f1f, #ffffff);
+  --mdv-hover-bg: light-dark(#f0f0f0, #1a1a1a);
+  --mdv-match: light-dark(#b58900, #f5d76e);
+  --mdv-shadow: light-dark(rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0.7));
+  --mdv-flash: light-dark(rgba(0, 95, 184, 0.2), rgba(55, 148, 255, 0.35));
+  --mdv-quick-bg: light-dark(#f3f3f3, #0a0a0a);
+  --mdv-input-bg: light-dark(#ffffff, #000000);
+  --mdv-highlight: light-dark(#0066bf, #f38518);
+  --hl-comment: light-dark(#008000, #6a9955);
+  --hl-keyword: light-dark(#0000ff, #569cd6);
+  --hl-string: light-dark(#a31515, #ce9178);
+  --hl-number: light-dark(#098658, #b5cea8);
+  --hl-title: light-dark(#795e26, #dcdcaa);
+  --hl-variable: light-dark(#001080, #9cdcfe);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --mdv-bg: #000000;
-    --mdv-fg: #ffffff;
-    --mdv-muted: #a0a0a0;
-    --mdv-link: #3794ff;
-    --mdv-border: #3c3c3c;
-    --mdv-code-bg: #0d0d0d;
-    --mdv-blockquote: #4a4a4a;
-    --mdv-bar-bg: #000000;
-    --mdv-bar-fg: #a0a0a0;
-    --mdv-bar-strong: #ffffff;
-    --mdv-focus: #f38518;
-    --mdv-picker-bg: #0a0a0a;
-    --mdv-picker-border: #6fc3df;
-    --mdv-sel-bg: #04395e;
-    --mdv-sel-fg: #ffffff;
-    --mdv-hover-bg: #1a1a1a;
-    --mdv-match: #f5d76e;
-    --mdv-shadow: rgba(0, 0, 0, 0.7);
-    --mdv-flash: rgba(55, 148, 255, 0.35);
-    --mdv-quick-bg: #0a0a0a;
-    --mdv-input-bg: #000000;
-    --mdv-highlight: #f38518;
-    --hl-comment: #6a9955;
-    --hl-keyword: #569cd6;
-    --hl-string: #ce9178;
-    --hl-number: #b5cea8;
-    --hl-title: #dcdcaa;
-    --hl-variable: #9cdcfe;
-  }
+:root[data-color-mode="light"] {
+  color-scheme: light;
+}
+
+:root[data-color-mode="dark"] {
+  color-scheme: dark;
 }
 
 html,
@@ -607,4 +586,21 @@ body.mdv-body {
 
 .hljs-strong {
   font-weight: bold;
+}
+
+/* notice, bottom right like a VS Code notification toast */
+
+.mdv-notice {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  max-width: 480px;
+  padding: 10px 14px;
+  background: var(--mdv-quick-bg);
+  color: var(--mdv-fg);
+  border: 1px solid var(--mdv-picker-border);
+  box-shadow: 0 4px 12px var(--mdv-shadow);
+  font-size: 13px;
+  line-height: 1.4;
+  z-index: 1003;
 }

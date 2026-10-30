@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Native messaging host of the extension, opens a markdown file in VS Code at
+a line and switches i3 to that VS Code window.
+
+Chromium starts this script on chrome.runtime.sendNativeMessage, writes one
+message to stdin (4 byte little endian length, then JSON) and reads one reply
+from stdout in the same framing. bin/install-editor-host registers it. The
+message
+
+    {"action": "open", "url": "file:///home/felix/repos/notes/a.md", "line": 12, "column": 1}
+
+asks the running VS Code for the equivalent of
+
+    code <folder> --goto /home/felix/repos/notes/a.md:12:1
+
+<folder> is the folder that was open in the VS Code window the file was
+launched from (bin/open-markdown records it), failing that the enclosing git
+repository, failing that nothing. VS Code reuses the window that has the
+folder open, or opens the folder in a new window, so the file lands in the
+right session and not in whatever window was active last. i3 runs with
+focus_on_window_activation urgent, so the window only gets an urgency flag,
+this script follows the flag and focuses the window.
+
+The request goes over the main process socket of VS Code (bin/vscode_ipc.py),
+a few milliseconds, the code CLI would start an Electron process for the same
+hand over and take about a second. With no VS Code answering on a socket the
+CLI runs, it also starts VS Code when none is running.
+
+Environment overrides, the smoke test uses them
+    BROWSER_MARKDOWN_VIEWER_SOCKET      VS Code main socket to use instead of the discovered ones
+    BROWSER_MARKDOWN_VIEWER_EDITOR      command to run instead of code
+    BROWSER_MARKDOWN_VIEWER_STATE       state file instead of the one under ~/.local/state
+    BROWSER_MARKDOWN_VIEWER_NO_FOCUS    set to skip the i3 focusing
+"""
+
+import json
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import urllib.parse
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import mdv_common  # noqa E402
+import vscode_ipc  # noqa E402
+
+SOCKET_ENV = "BROWSER_MARKDOWN_VIEWER_SOCKET"
+EDITOR_ENV = "BROWSER_MARKDOWN_VIEWER_EDITOR"
+NO_FOCUS_ENV = "BROWSER_MARKDOWN_VIEWER_NO_FOCUS"
+EDITOR_CANDIDATES = ["/usr/local/bin/code", "/usr/bin/code", "/opt/vscode/bin/code", "/snap/bin/code"]
+EDITOR_CLASSES = {"code", "code - insiders", "code-insiders", "code - oss", "code-oss", "vscodium"}
+FOCUS_TIMEOUT_S = 6.0
+EDITOR_TIMEOUT_S = 30
+
+
+def read_message():
+    raw_length = sys.stdin.buffer.read(4)
+    if len(raw_length) < 4:
+        return None
+    length = struct.unpack("<I", raw_length)[0]
+    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+
+
+def send_message(message):
+    body = json.dumps(message).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack("<I", len(body)))
+    sys.stdout.buffer.write(body)
+    sys.stdout.buffer.flush()
+
+
+def editor_command():
+    override = os.environ.get(EDITOR_ENV)
+    if override:
+        return override
+    found = shutil.which("code")
+    if found:
+        return found
+    for candidate in EDITOR_CANDIDATES:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def file_path(url):
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "file":
+        raise ValueError(f"not a file url, {url}")
+    return urllib.parse.unquote(parsed.path)
+
+
+def is_editor(node):
+    return mdv_common.window_class(node) in EDITOR_CLASSES
+
+
+def by_title(*names):
+    """Chooser for focus_window, the first window whose title holds one of the names."""
+
+    def choose(windows):
+        for name in names:
+            if not name:
+                continue
+            for window in windows:
+                if name in mdv_common.window_title(window):
+                    return window
+        return None
+
+    return choose
+
+
+def open_in_editor(message):
+    path = file_path(str(message.get("url", "")))
+    if not os.path.isfile(path):
+        raise ValueError(f"not a file, {path}")
+    line = max(1, int(message.get("line") or 1))
+    column = max(1, int(message.get("column") or 1))
+    folder = (
+        mdv_common.recorded_workspace(path)
+        or mdv_common.recorded_workspace(os.path.realpath(path))
+        or mdv_common.git_root(path)
+    )
+    targets = ([folder] if folder else []) + [f"{path}:{line}:{column}"]
+    reply = {"ok": True, "folder": folder, "targets": targets}
+    socket_override = os.environ.get(SOCKET_ENV)
+    try:
+        reply["socket"] = vscode_ipc.open_paths(targets, os.environ, [socket_override] if socket_override else None)
+        reply["via"] = "socket"
+    except vscode_ipc.Unavailable as error:
+        reply["via"] = "cli"
+        reply["socketError"] = str(error)
+        reply["command"] = run_cli(targets)
+    if not os.environ.get(NO_FOCUS_ENV):
+        choose = by_title(os.path.basename(folder) if folder else "", os.path.basename(path))
+        reply["focused"] = mdv_common.focus_window(is_editor, FOCUS_TIMEOUT_S, choose)
+    return reply
+
+
+def run_cli(targets):
+    """code <folder> --goto <file>:<line>:<column>, the slow path, returns the command."""
+    editor = editor_command()
+    if not editor:
+        raise ValueError("code not found on the PATH, set " + EDITOR_ENV)
+    command = [editor] + targets[:-1] + ["--goto", targets[-1]]
+    # stdout is the message pipe, nothing started here may write to it
+    result = subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=EDITOR_TIMEOUT_S,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"{os.path.basename(editor)} exited with {result.returncode}, {result.stderr.strip()}")
+    return command
+
+
+def main():
+    message = read_message()
+    if message is None:
+        return 1
+    action = message.get("action") if isinstance(message, dict) else None
+    try:
+        if action == "ping":
+            send_message({"ok": True, "host": os.path.realpath(__file__)})
+        elif action == "open":
+            send_message(open_in_editor(message))
+        else:
+            send_message({"ok": False, "error": f"unknown action, {action}"})
+    except Exception as error:  # the browser shows the message on the page
+        send_message({"ok": False, "error": str(error)})
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

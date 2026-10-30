@@ -1,8 +1,11 @@
-// Background worker. Three jobs, reuse an already open tab when the same file
+// Background worker. Four jobs, reuse an already open tab when the same file
 // is opened again (the VS Code binding lands here), read files from disk for
-// live reload, and list directories for the folder crumbs.
+// live reload, list directories for the folder crumbs, and hand a file and
+// line to the native messaging host on ctrl+shift+v.
 
 const LOG_PREFIX = "[browser-markdown-viewer]";
+// registered by bin/install-editor-host, runs bin/editor-host
+const EDITOR_HOST = "browser_markdown_viewer";
 const MARKDOWN_EXTENSIONS = [".md", ".markdown", ".mdown"];
 const FRESH_TAB_WINDOW_MS = 3000;
 
@@ -189,9 +192,39 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   await chrome.tabs.create({});
 });
 
+// ctrl+shift+v, the host runs code with the file and line and focuses the
+// VS Code window. Chromium reports a missing or mismatched host manifest as
+// an error, the page shows that text.
+async function openInEditor(message) {
+  const reply = await chrome.runtime.sendNativeMessage(EDITOR_HOST, {
+    action: "open",
+    url: message.url,
+    line: message.line,
+    column: message.column
+  });
+  return reply || { ok: false, error: "empty reply from the editor host" };
+}
+
+function editorHostError(error) {
+  const text = String(error?.message || error);
+  if (/not found/i.test(text)) {
+    return "editor host not installed, run bin/install-editor-host and reload the extension";
+  }
+  if (/forbidden/i.test(text)) {
+    return "editor host rejects this extension id, run bin/install-editor-host again and reload the extension";
+  }
+  return text;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {
     return false;
+  }
+  if (message.type === "openInEditor") {
+    openInEditor(message)
+      .then((reply) => sendResponse(reply))
+      .catch((error) => sendResponse({ ok: false, error: editorHostError(error) }));
+    return true;
   }
   if (message.type === "read") {
     readFile(message.url)

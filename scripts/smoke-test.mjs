@@ -6,11 +6,14 @@
 //
 // Copies the file into the output folder, loads the extension unpacked, opens the
 // copy, then exercises rendering, the breadcrumb chord, the picker, the filter,
-// the folder crumb, live reload and tab reuse. Screenshots land in the output folder.
+// the folder crumb, the jump back to the editor, live reload and tab reuse.
+// Screenshots land in the output folder.
 
 import { spawn } from "node:child_process";
-import { mkdirSync, copyFileSync, writeFileSync, appendFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, copyFileSync, writeFileSync, appendFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, resolve, basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -59,6 +62,147 @@ writeFileSync(
 );
 const fileUrl = "file://" + testFile;
 
+// ctrl+shift+v runs bin/editor-host over native messaging. The browser looks
+// for host manifests in its config dir under XDG_CONFIG_HOME (not under the
+// profile given with --user-data-dir), so a throwaway config home is seeded
+// with the manifest for Brave, Chrome and Chromium. The host talks to a fake
+// VS Code main socket served below that records the requests, falls back to
+// a stub editor that records its arguments in place of code, skips the i3
+// focusing, and reads a seeded state file that records the folder the test
+// file was launched from.
+const editorStub = join(out, "editor-stub");
+const editorArgsFile = join(out, "editor-args.txt");
+writeFileSync(editorStub, "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + JSON.stringify(editorArgsFile) + "\n", { mode: 0o755 });
+const stateFile = join(out, "workspaces.json");
+writeFileSync(stateFile, JSON.stringify({ version: 1, files: { [testFile]: { folder: join(out, "docs"), time: Date.now() / 1000 } } }));
+const hostPath = join(extensionDir, "bin", "editor-host");
+const configHome = join(out, "config");
+for (const vendor of ["BraveSoftware/Brave-Browser", "google-chrome", "chromium"]) {
+  const hostsDir = join(configHome, vendor, "NativeMessagingHosts");
+  mkdirSync(hostsDir, { recursive: true });
+  writeFileSync(
+    join(hostsDir, "browser_markdown_viewer.json"),
+    JSON.stringify({ name: "browser_markdown_viewer", description: "smoke test host", path: hostPath, type: "stdio", allowed_origins: ["chrome-extension://" + extensionId + "/"] })
+  );
+}
+// a Unix socket path holds about a hundred bytes, so the fake VS Code socket
+// lives in the runtime dir (where VS Code keeps its own) and not under out
+const vscodeSocket = join(process.env.XDG_RUNTIME_DIR || tmpdir(), "mdv-smoke-" + process.pid + ".sock");
+const hostEnv = {
+  ...process.env,
+  XDG_CONFIG_HOME: configHome,
+  BROWSER_MARKDOWN_VIEWER_SOCKET: vscodeSocket,
+  BROWSER_MARKDOWN_VIEWER_EDITOR: editorStub,
+  BROWSER_MARKDOWN_VIEWER_STATE: stateFile,
+  BROWSER_MARKDOWN_VIEWER_NO_FOCUS: "1"
+};
+// a socket path nothing listens on, the host then runs the stub editor
+const cliEnv = { ...hostEnv, BROWSER_MARKDOWN_VIEWER_SOCKET: vscodeSocket + ".none" };
+
+// The fake VS Code main socket, the wire format is described in
+// bin/vscode_ipc.py. Every launch.start request lands in vscodeRequests.
+function varint(value) {
+  const bytes = [];
+  do {
+    let byte = value & 0x7f;
+    value >>>= 7;
+    if (value) {
+      byte |= 0x80;
+    }
+    bytes.push(byte);
+  } while (value);
+  return Buffer.from(bytes);
+}
+function vscSerialize(data) {
+  if (data === undefined) {
+    return Buffer.from([0]);
+  }
+  if (typeof data === "string") {
+    const raw = Buffer.from(data);
+    return Buffer.concat([Buffer.from([1]), varint(raw.length), raw]);
+  }
+  if (Array.isArray(data)) {
+    return Buffer.concat([Buffer.from([4]), varint(data.length), ...data.map(vscSerialize)]);
+  }
+  if (Number.isInteger(data)) {
+    return Buffer.concat([Buffer.from([6]), varint(data)]);
+  }
+  const raw = Buffer.from(JSON.stringify(data));
+  return Buffer.concat([Buffer.from([5]), varint(raw.length), raw]);
+}
+function vscDeserialize(buf, pos) {
+  const tag = buf[pos++];
+  const readVarint = () => {
+    let value = 0;
+    for (let shift = 0; ; shift += 7) {
+      const byte = buf[pos++];
+      value |= (byte & 0x7f) << shift;
+      if (!(byte & 0x80)) {
+        return value;
+      }
+    }
+  };
+  if (tag === 0) {
+    return [undefined, pos];
+  }
+  if (tag === 1) {
+    const length = readVarint();
+    return [buf.subarray(pos, pos + length).toString(), pos + length];
+  }
+  if (tag === 4) {
+    const count = readVarint();
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const [item, next] = vscDeserialize(buf, pos);
+      items.push(item);
+      pos = next;
+    }
+    return [items, pos];
+  }
+  if (tag === 5) {
+    const length = readVarint();
+    return [JSON.parse(buf.subarray(pos, pos + length).toString()), pos + length];
+  }
+  if (tag === 6) {
+    return [readVarint(), pos];
+  }
+  throw new Error("unexpected type tag " + tag);
+}
+function vscFrame(payload) {
+  const header = Buffer.alloc(13);
+  header.writeUInt8(1, 0);
+  header.writeUInt32BE(payload.length, 9);
+  return Buffer.concat([header, payload]);
+}
+const vscodeRequests = [];
+const vscodeServer = createServer((connection) => {
+  let pending = Buffer.alloc(0);
+  let greeted = false;
+  connection.on("data", (chunk) => {
+    pending = Buffer.concat([pending, chunk]);
+    while (pending.length >= 13) {
+      const length = pending.readUInt32BE(9);
+      if (pending.length < 13 + length) {
+        break;
+      }
+      const payload = pending.subarray(13, 13 + length);
+      pending = pending.subarray(13 + length);
+      if (!greeted) {
+        greeted = true;
+        connection.write(vscFrame(vscSerialize([200])));
+        continue;
+      }
+      const [header, pos] = vscDeserialize(payload, 0);
+      const [body] = vscDeserialize(payload, pos);
+      vscodeRequests.push({ channel: header[2], name: header[3], args: body });
+      connection.write(vscFrame(Buffer.concat([vscSerialize([201, header[1]]), vscSerialize(undefined)])));
+    }
+  });
+  connection.on("error", () => {});
+});
+rmSync(vscodeSocket, { force: true });
+await new Promise((listening) => vscodeServer.listen(vscodeSocket, listening));
+
 const failures = [];
 function check(name, ok, details) {
   console.log((ok ? "PASS " : "FAIL ") + name + (details !== undefined ? "  " + JSON.stringify(details) : ""));
@@ -67,6 +211,61 @@ function check(name, ok, details) {
   }
 }
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+// one framed message to the host, the reply decoded, asynchronous so the
+// fake VS Code socket can answer meanwhile
+function callHost(message, env = hostEnv) {
+  return new Promise((done) => {
+    const body = Buffer.from(JSON.stringify(message));
+    const length = Buffer.alloc(4);
+    length.writeUInt32LE(body.length);
+    const child = spawn(hostPath, [], { env });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("close", (status) => {
+      const output = Buffer.concat(stdout);
+      if (status !== 0 || output.length < 4) {
+        done({ ok: false, error: "host exited with " + status + " " + Buffer.concat(stderr) });
+        return;
+      }
+      done(JSON.parse(output.subarray(4, 4 + output.readUInt32LE(0)).toString()));
+    });
+    child.stdin.end(Buffer.concat([length, body]));
+  });
+}
+const otherFile = join(out, "docs", "nested", "other.md");
+check("host answers a ping", (await callHost({ action: "ping" })).ok === true);
+const viaSocket = await callHost({ action: "open", url: fileUrl, line: 7, column: 1 });
+const socketRequest = vscodeRequests.at(-1);
+check(
+  "host opens a launched file in its recorded folder over the VS Code socket",
+  viaSocket.ok === true &&
+    viaSocket.via === "socket" &&
+    viaSocket.folder === join(out, "docs") &&
+    socketRequest !== undefined &&
+    socketRequest.channel === "launch" &&
+    socketRequest.name === "start" &&
+    JSON.stringify(socketRequest.args[0]) === JSON.stringify({ _: [join(out, "docs"), `${testFile}:7:1`], goto: true }) &&
+    socketRequest.args[1].VSCODE_CLI === "1",
+  { viaSocket, socketRequest: socketRequest && { channel: socketRequest.channel, name: socketRequest.name, args: socketRequest.args[0] } }
+);
+const viaCli = await callHost({ action: "open", url: fileUrl, line: 7, column: 1 }, cliEnv);
+check(
+  "host falls back to the code CLI without a VS Code socket",
+  viaCli.ok === true && viaCli.via === "cli" && viaCli.command.join(" ") === `${editorStub} ${join(out, "docs")} --goto ${testFile}:7:1` && existsSync(editorArgsFile),
+  viaCli
+);
+const unrecorded = await callHost({ action: "open", url: "file://" + otherFile, line: 3, column: 1 }, cliEnv);
+check(
+  "host falls back to the git root for a file it never launched" + (args.git ? "" : ", or to no folder outside a repository"),
+  unrecorded.ok === true && unrecorded.folder === (args.git ? join(out, "docs") : null) && unrecorded.command.slice(-2).join(" ") === `--goto ${otherFile}:3:1`,
+  unrecorded
+);
+const missing = await callHost({ action: "open", url: "file:///nowhere/missing.md", line: 1, column: 1 }, cliEnv);
+check("host reports a missing file", missing.ok === false && /not a file/.test(missing.error), missing);
+rmSync(editorArgsFile, { force: true });
 
 const launchArgs = [
   "--headless=new",
@@ -80,7 +279,7 @@ const launchArgs = [
   "--remote-debugging-port=" + port,
   fileUrl
 ];
-const proc = spawn(browser, launchArgs, { stdio: ["ignore", "pipe", "pipe"] });
+const proc = spawn(browser, launchArgs, { stdio: ["ignore", "pipe", "pipe"], env: hostEnv });
 proc.stderr.on("data", (chunk) => appendFileSync(join(out, "browser.log"), chunk));
 proc.stdout.on("data", (chunk) => appendFileSync(join(out, "browser.log"), chunk));
 
@@ -189,6 +388,20 @@ try {
   const rendered = await waitFor(session, `document.querySelectorAll('.mdv-mermaid.mdv-rendered svg').length === ${diagramCount}`, 60000);
   check("all mermaid diagrams rendered", rendered, { diagrams: diagramCount, rendered: await session.evaluate("document.querySelectorAll('.mdv-mermaid.mdv-rendered svg').length"), errors: await session.evaluate("document.querySelectorAll('.mdv-diagram-error').length") });
   await session.screenshot("01-top.png");
+
+  // data-color-mode, set by the color mode toggle extension, wins over the
+  // system setting. Diagrams draw again in the theme of the mark.
+  const systemDark = await session.evaluate("matchMedia('(prefers-color-scheme: dark)').matches");
+  const themeState = `({
+    bg: getComputedStyle(document.body).backgroundColor,
+    diagrams: document.querySelectorAll('.mdv-mermaid.mdv-rendered svg').length,
+    darkDiagrams: Array.from(document.querySelectorAll('.mdv-mermaid svg')).filter(svg => svg.innerHTML.includes('#1f2020')).length
+  })`;
+  const themeMatches = (dark) => `(() => { const s = ${themeState}; return s.bg === ${JSON.stringify(dark ? "rgb(0, 0, 0)" : "rgb(255, 255, 255)")} && s.diagrams === ${diagramCount} && s.darkDiagrams === ${dark ? diagramCount : 0}; })()`;
+  await session.evaluate(`document.documentElement.dataset.colorMode = ${JSON.stringify(systemDark ? "light" : "dark")}`);
+  check("color mode mark overrides the system theme", await waitFor(session, themeMatches(!systemDark), 30000), await session.evaluate(themeState));
+  await session.evaluate("delete document.documentElement.dataset.colorMode");
+  check("without the mark the system theme returns", await waitFor(session, themeMatches(systemDark), 30000), await session.evaluate(themeState));
 
   const anchors = await session.evaluate(`
     Array.from(document.querySelectorAll('.mdv-content a[href^="#"]')).map(a => decodeURIComponent(a.getAttribute('href').slice(1)))
@@ -339,6 +552,23 @@ try {
   await session.evaluate("document.querySelector('.mdv-content a[href=\"#queue\"]').click()");
   await sleep(500);
   check("an anchor link jumps", (await session.evaluate("Array.from(document.querySelectorAll('.mdv-crumb')).map(c => c.textContent)")).slice(-1)[0] === "### Queue");
+  // ctrl+shift+v hands the file and the source line at the reading position to
+  // the editor, here the line of the heading just jumped to, counted in the
+  // file on disk with any front matter
+  const queueLine = readFileSync(testFile, "utf8").split("\n").findIndex((text) => /^###\s+Queue\s*$/.test(text)) + 1;
+  const requestsBefore = vscodeRequests.length;
+  await session.key("V", "KeyV", 86, MOD.ctrl | MOD.shift);
+  // the wait ends on a request at the fake VS Code socket or on a failure
+  // notice, whichever comes first, a notice lives long enough to be read here
+  const editorDeadline = Date.now() + 8000;
+  let editorNotice = null;
+  while (vscodeRequests.length === requestsBefore && editorNotice === null && Date.now() < editorDeadline) {
+    await sleep(100);
+    editorNotice = await session.evaluate("document.querySelector('.mdv-notice')?.textContent ?? null");
+  }
+  const editorRequest = vscodeRequests.length > requestsBefore ? vscodeRequests.at(-1).args[0] : null;
+  check("ctrl+shift+v opens the file in the editor at the current line", editorRequest !== null && JSON.stringify(editorRequest) === JSON.stringify({ _: [join(out, "docs"), `${testFile}:${queueLine}:1`], goto: true }), { editorRequest, queueLine });
+  check("no failure notice after the jump to the editor", editorNotice === null, { editorNotice });
   await session.key("ArrowLeft", "ArrowLeft", 37, MOD.alt);
   await sleep(400);
   check("alt+left returns from an anchor link", Math.abs((await session.evaluate("window.scrollY")) - smallMove) <= 4);
@@ -453,6 +683,8 @@ try {
 } catch (error) {
   check("script ran to the end", false, String(error?.stack || error));
 } finally {
+  vscodeServer.close();
+  rmSync(vscodeSocket, { force: true });
   proc.kill("SIGTERM");
   await sleep(500);
   proc.kill("SIGKILL");

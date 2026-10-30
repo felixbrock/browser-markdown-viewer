@@ -4,7 +4,8 @@
   "description": "Renders local markdown files in the browser with VS Code style breadcrumb navigation.",
   "version": "1.0.0",
   "permissions": [
-    "tabs"
+    "tabs",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "file:///*"
